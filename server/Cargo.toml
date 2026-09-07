@@ -4,6 +4,76 @@ version = "0.23.0"
 edition = "2021"
 license = "Apache-2.0"
 
+# Dual lib+bin (cognee-rs's documented http-server pattern, see
+# _research_refs/cognee-rs/docs/http-server/architecture.md): the router is
+# a library so it's testable via tower::ServiceExt::oneshot without binding
+# a real socket, and the `[[bin]]` — which pulls in clap/dotenv for CLI arg
+# parsing — is gated behind the `bin` feature so a library-only consumer
+# (tests, an embedder) doesn't pay for those deps.
+[lib]
+name = "z3rno_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "z3rno-server"
 path = "src/main.rs"
+required-features = ["bin"]
+
+[features]
+default = ["bin", "telemetry"]
+bin = ["dep:clap", "dep:dotenvy", "tokio/rt-multi-thread", "tokio/signal"]
+# OpenTelemetry tracing bridge, compiled in by default (matching
+# cognee-rs's `telemetry` feature) but a no-op at runtime unless
+# OTEL_ENABLED=true is set — see src/observability.rs. `--no-default-features
+# --features bin` strips the OTel deps entirely for anyone who wants a
+# smaller binary and never plans to turn it on.
+telemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
+# Redis/Valkey cache backend — opt-in, never required. Default is the
+# SQLite-file CacheBackend (decision-doc 0004): the server starts and
+# passes its full test suite with zero external cache service running.
+redis-cache = ["dep:redis"]
+
+[dependencies]
+z3rno-engine = { path = "../engine" }
+
+axum = { version = "0.8", features = ["json", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+tokio = { version = "1", features = ["macros", "rt", "net", "time"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+async-trait = "0.1"
+
+jsonwebtoken = "9"
+bcrypt = "0.16"
+sha2 = "0.10"
+
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# telemetry feature
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.28", optional = true }
+
+# redis-cache feature
+redis = { version = "0.27", features = ["tokio-comp"], optional = true }
+
+# bin feature
+clap = { version = "4", features = ["derive", "env"], optional = true }
+dotenvy = { version = "0.15", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+http-body-util = "0.1"
+tempfile = "3"

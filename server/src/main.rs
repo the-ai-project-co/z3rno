@@ -30,7 +30,11 @@ struct Args {
 
     /// SQLite file for the cache backend (sessions, auth verification
     /// cache, admin budgets). Separate from the engine's own storage.
-    #[arg(long, env = "Z3RNO_CACHE_SQLITE_PATH", default_value = "z3rno-cache.db")]
+    #[arg(
+        long,
+        env = "Z3RNO_CACHE_SQLITE_PATH",
+        default_value = "z3rno-cache.db"
+    )]
     cache_sqlite_path: String,
 
     /// Secret used to sign/verify JWTs. Required — the server refuses to
@@ -49,6 +53,7 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     observability::init_tracing();
+    observability::install_metrics_recorder();
     let args = Args::parse();
 
     let engine = match &args.database_url {

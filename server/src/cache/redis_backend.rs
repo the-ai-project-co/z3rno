@@ -31,7 +31,9 @@ impl CacheBackend for RedisCacheBackend {
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| CacheError::Backend(e.into()))?;
-        conn.get(key).await.map_err(|e| CacheError::Backend(e.into()))
+        conn.get(key)
+            .await
+            .map_err(|e| CacheError::Backend(e.into()))
     }
 
     async fn set(&self, key: &str, value: String, ttl: Option<Duration>) -> CacheResult<()> {
@@ -48,7 +50,10 @@ impl CacheBackend for RedisCacheBackend {
                     .map_err(|e| CacheError::Backend(e.into()))?;
             }
             None => {
-                let _: () = conn.set(key, value).await.map_err(|e| CacheError::Backend(e.into()))?;
+                let _: () = conn
+                    .set(key, value)
+                    .await
+                    .map_err(|e| CacheError::Backend(e.into()))?;
             }
         }
         Ok(())
@@ -60,7 +65,10 @@ impl CacheBackend for RedisCacheBackend {
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| CacheError::Backend(e.into()))?;
-        let _: () = conn.del(key).await.map_err(|e| CacheError::Backend(e.into()))?;
+        let _: () = conn
+            .del(key)
+            .await
+            .map_err(|e| CacheError::Backend(e.into()))?;
         Ok(())
     }
 }

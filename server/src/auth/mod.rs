@@ -81,7 +81,10 @@ impl AuthContext {
 impl FromRequestParts<AppState> for AuthContext {
     type Rejection = ApiError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         extractor::authenticate(parts, state).await
     }
 }

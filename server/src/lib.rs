@@ -55,6 +55,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::sessions::router())
         .merge(routes::admin::router())
         .merge(routes::health::router())
+        .route_layer(axum::middleware::from_fn(observability::metrics_layer))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())

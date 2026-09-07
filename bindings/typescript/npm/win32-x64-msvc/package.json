@@ -1,0 +1,22 @@
+{
+  "name": "@z3rno/sdk-win32-x64-msvc",
+  "version": "0.23.0",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "z3rno-sdk-native.win32-x64-msvc.node",
+  "files": [
+    "z3rno-sdk-native.win32-x64-msvc.node"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

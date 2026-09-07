@@ -1,0 +1,22 @@
+{
+  "name": "@z3rno/cli-win32-x64-msvc",
+  "version": "0.23.0",
+  "description": "z3rno CLI binary for x86_64-pc-windows-msvc",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/z3rno.exe"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@z3rno/cli-darwin-x64",
+  "version": "0.23.0",
+  "description": "z3rno CLI binary for x86_64-apple-darwin",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/z3rno"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

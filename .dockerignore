@@ -1,0 +1,12 @@
+target
+**/target
+.git
+.worktree
+.github
+frontend
+bindings/typescript/node_modules
+npm/**/node_modules
+spikes
+starter-kit
+*.log
+.DS_Store

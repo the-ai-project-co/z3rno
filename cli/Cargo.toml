@@ -7,3 +7,23 @@ license = "Apache-2.0"
 [[bin]]
 name = "z3rno"
 path = "src/main.rs"
+
+[dependencies]
+z3rno-engine = { path = "../engine" }
+# `run`/`AppState` (server/src/lib.rs) are always-on library exports, not
+# gated by the `bin` feature that main.rs's own doc comment mentions — that
+# feature only gates z3rno-server's `[[bin]]` target (its clap/dotenvy CLI
+# parsing). Depending on it with `default-features = false` skips that
+# feature's clap/dotenvy pull *and* the opt-in `telemetry` OTel bridge,
+# which this CLI's own `serve` doesn't need — `observability::init_tracing`
+# just falls back to the plain `tracing_subscriber` path without it.
+z3rno-server = { path = "../server", default-features = false }
+
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4"] }
+serde_json = "1"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

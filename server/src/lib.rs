@@ -6,8 +6,7 @@
 //!
 //! Structured as a library + a thin `[[bin]]` (see Cargo.toml's doc
 //! comment) so `build_router` is testable via `tower::ServiceExt::oneshot`
-//! without binding a real socket — the pattern `_research_refs/cognee-rs`'s
-//! own http-server crate documents and uses.
+//! without binding a real socket.
 
 pub mod auth;
 pub mod cache;
@@ -29,7 +28,7 @@ use crate::cache::CacheBackend;
 
 /// Shared state every route handler gets via `axum::extract::State`.
 /// `Clone` is cheap — every field is an `Arc` (or `Arc`-wrapping trait
-/// object), matching cognee-rs's documented `AppState` shape.
+/// object).
 #[derive(Clone)]
 pub struct AppState {
     pub engine: Arc<MemoryEngine>,

@@ -3,13 +3,17 @@ name = "z3rno-server"
 version = "0.23.0"
 edition = "2021"
 license = "Apache-2.0"
+description = "HTTP API server for z3rno: exposes the memory engine's store/recall/forget/audit verbs over Axum, with pluggable auth and caching."
+repository = "https://github.com/the-ai-project-co/z3rno"
+readme = "README.md"
+keywords = ["memory", "http-api", "axum", "ai-agents", "server"]
+categories = ["web-programming::http-server", "asynchronous"]
 
-# Dual lib+bin (cognee-rs's documented http-server pattern, see
-# _research_refs/cognee-rs/docs/http-server/architecture.md): the router is
-# a library so it's testable via tower::ServiceExt::oneshot without binding
-# a real socket, and the `[[bin]]` — which pulls in clap/dotenv for CLI arg
-# parsing — is gated behind the `bin` feature so a library-only consumer
-# (tests, an embedder) doesn't pay for those deps.
+# Dual lib+bin: the router is a library so it's testable via
+# tower::ServiceExt::oneshot without binding a real socket, and the
+# `[[bin]]` — which pulls in clap/dotenv for CLI arg parsing — is gated
+# behind the `bin` feature so a library-only consumer (tests, an embedder)
+# doesn't pay for those deps.
 [lib]
 name = "z3rno_server"
 path = "src/lib.rs"
@@ -22,11 +26,10 @@ required-features = ["bin"]
 [features]
 default = ["bin", "telemetry"]
 bin = ["dep:clap", "dep:dotenvy", "tokio/rt-multi-thread", "tokio/signal"]
-# OpenTelemetry tracing bridge, compiled in by default (matching
-# cognee-rs's `telemetry` feature) but a no-op at runtime unless
-# OTEL_ENABLED=true is set — see src/observability.rs. `--no-default-features
-# --features bin` strips the OTel deps entirely for anyone who wants a
-# smaller binary and never plans to turn it on.
+# OpenTelemetry tracing bridge, compiled in by default but a no-op at
+# runtime unless OTEL_ENABLED=true is set — see src/observability.rs.
+# `--no-default-features --features bin` strips the OTel deps entirely for
+# anyone who wants a smaller binary and never plans to turn it on.
 telemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 # Redis/Valkey cache backend — opt-in, never required. Default is the
 # SQLite-file CacheBackend (decision-doc 0004): the server starts and

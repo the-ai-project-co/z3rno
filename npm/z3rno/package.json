@@ -1,0 +1,30 @@
+{
+  "name": "z3rno",
+  "version": "0.23.0",
+  "description": "The z3rno CLI: bootstrap a local memory store, run the server, and store/recall memories from the command line.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/the-ai-project-co/z3rno"
+  },
+  "bin": {
+    "z3rno": "bin/z3rno.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "optionalDependencies": {
+    "@z3rno/cli-darwin-arm64": "0.23.0",
+    "@z3rno/cli-darwin-x64": "0.23.0",
+    "@z3rno/cli-linux-x64-gnu": "0.23.0",
+    "@z3rno/cli-linux-arm64-gnu": "0.23.0",
+    "@z3rno/cli-win32-x64-msvc": "0.23.0"
+  }
+}

@@ -1,6 +1,6 @@
-//! One error envelope for the whole server (cognee-rs's documented
-//! pattern: a single `ApiError` implementing `IntoResponse`). The health
-//! router is the one deliberate exception — it returns its own bespoke
+//! One error envelope for the whole server: a single `ApiError`
+//! implementing `IntoResponse`. The health router is the one deliberate
+//! exception — it returns its own bespoke
 //! `{status, reason}` shape instead of this envelope, matching the old
 //! Python API's health response verbatim rather than "fixing" it into
 //! consistency it never had.

@@ -23,6 +23,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 petgraph = "0.6"
 hnsw_rs = "0.3.4"
 sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json"] }
+pgvector = { version = "0.4", features = ["sqlx"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

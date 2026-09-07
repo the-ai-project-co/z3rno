@@ -1,0 +1,68 @@
+name: Release bindings
+
+# Placeholder release pipeline for the language bindings (PyO3 -> PyPI,
+# napi-rs -> npm). Publish steps are stubs — wiring real PyPI/npm trusted
+# publishing OIDC is slice 0007's job.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish-python:
+    name: publish-python
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build (release profile)
+        if: hashFiles('bindings/python/Cargo.toml') != ''
+        run: cargo build --manifest-path bindings/python/Cargo.toml --release
+
+      - name: Publish to PyPI
+        run: |
+          echo "TODO: wire up PyPI trusted publishing (OIDC) in slice 0007"
+          exit 0
+
+  publish-npm:
+    name: publish-npm
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build (release profile)
+        if: hashFiles('bindings/typescript/Cargo.toml') != ''
+        run: cargo build --manifest-path bindings/typescript/Cargo.toml --release
+
+      - name: Publish to npm
+        run: |
+          echo "TODO: wire up npm provenance publish (OIDC) in slice 0007"
+          exit 0

@@ -29,13 +29,20 @@ Memory is organized across four tiers — working, episodic, semantic, and proce
 - **Bindings** — native compiled bindings for Python (PyO3) and TypeScript (napi-rs); the SDK *is* the engine, not a thin client.
 - **Server** — an optional Axum HTTP server for production, multi-tenant, or multi-language deployments.
 - **CLI** — a standalone binary, distributed via both crates.io and npm.
-- **Production backend** — pluggable; the embedded default is not the only option for scaled deployments.
+- **Production backend** — Postgres + pgvector + Apache AGE, chosen after a spike comparing it against SurrealDB and Neo4j+Qdrant on multi-tenant isolation, operational complexity, and licensing; see `spikes/0002-backend-eval/`.
 
 Full architecture rationale lives in this org's internal decision and plan documents.
 
 ## Status
 
-Pre-v1.0.0. Follow progress via the issues and PRs in this repo — every unit of work ships as its own pull request against `main`.
+Pre-v1.0.0. Every unit of work ships as its own pull request against `main`; follow progress via the issues and PRs in this repo.
+
+**Shipped so far:**
+
+- **Slice 0001 — Monorepo bootstrap.** Cargo workspace (`engine`/`server`/`cli`), Python (PyO3) and TypeScript (napi-rs) binding scaffolds, CI (fmt/clippy/test).
+- **Slice 0002 — Production backend evaluation spike.** Working Rust proof-of-concepts against real, dockerized Postgres+pgvector+AGE, SurrealDB, and Neo4j+Qdrant instances, scored against a shared rubric. Decided: Postgres + pgvector + Apache AGE is the production backend slice 0004 builds against.
+
+**Up next:** slice 0003 — core engine + embedded backend (SQLite + embedded vector + embedded graph).
 
 ## Installation
 

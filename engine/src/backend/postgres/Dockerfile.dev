@@ -1,0 +1,14 @@
+# Dev-only image for local testing of the Postgres backend. Mirrors the
+# recipe verified in spikes/0002-backend-eval/postgres-age/Dockerfile:
+# apache/age ships Postgres + AGE preinstalled; pgvector is a one-line
+# `apt-get install` from the same pgdg repo, no source build needed.
+#
+# This is NOT what auto-provisioning targets in production — production
+# points at "any stock Postgres 17+ with these extensions installable"
+# (decision-doc 0002), provisioned at startup by `provision::ensure()`.
+# This image just gives that a real instance to run against locally.
+FROM apache/age:latest
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-18-pgvector \
+    && rm -rf /var/lib/apt/lists/*

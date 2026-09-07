@@ -6,7 +6,7 @@ pub mod engine;
 pub mod model;
 
 pub use audit::{AuditEvent, AuditOperation, ForgetProof};
-pub use engine::{Advanced, MemoryEngine};
+pub use engine::{Advanced, BackendTier, MemoryEngine};
 pub use model::{Memory, Tier};
 
 /// Returns the crate's version, as set in `Cargo.toml`.

@@ -8,6 +8,7 @@ mod relational;
 mod vector;
 
 pub mod embedded;
+pub mod postgres;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod mock;

@@ -1,0 +1,13 @@
+services:
+  db:
+    build: .
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: z3rno_spike
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

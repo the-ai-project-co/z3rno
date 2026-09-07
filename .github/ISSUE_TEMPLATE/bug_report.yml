@@ -1,0 +1,59 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report — please be as specific as possible.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: What happened vs. what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        - OS:
+        - Binding: Rust / Python / TypeScript
+        - z3rno version:
+        - Backend: embedded / production (which one)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues to avoid a duplicate
+          required: true
+        - label: I included steps to reproduce
+          required: true

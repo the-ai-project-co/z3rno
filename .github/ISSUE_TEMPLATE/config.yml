@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Discussions
+    url: https://github.com/the-ai-project-co/z3rno/discussions
+    about: Ask questions or start a discussion
+  - name: 📖 Documentation
+    url: https://z3rno.dev
+    about: Check the docs for guides and reference

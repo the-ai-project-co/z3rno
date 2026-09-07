@@ -310,6 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { hello } = nativeBinding
+const { Client, Advanced } = nativeBinding
 
-module.exports.hello = hello
+module.exports.Client = Client
+module.exports.Advanced = Advanced

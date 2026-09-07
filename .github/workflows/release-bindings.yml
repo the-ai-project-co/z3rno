@@ -1,8 +1,14 @@
 name: Release bindings
 
-# Placeholder release pipeline for the language bindings (PyO3 -> PyPI,
-# napi-rs -> npm). Publish steps are stubs — wiring real PyPI/npm trusted
-# publishing OIDC is slice 0007's job.
+# Real release pipeline for the language bindings (slice 0006.5/0006.6):
+# multi-platform PyO3 wheels -> PyPI (trusted publishing / OIDC), and
+# multi-platform napi-rs native addons -> npm (with provenance). Neither
+# publish job has been exercised against a real tag push yet — that needs
+# PyPI's trusted-publisher and npm's provenance trust relationships
+# configured for this repo/org first, a one-time out-of-band setup step.
+#
+# Deeper supply-chain attestation (SLSA build provenance, SBOM, PEP 740) is
+# slice 0007's job, layered on top of this — not duplicated here.
 
 on:
   push:
@@ -10,36 +16,138 @@ on:
       - "v*.*.*"
 
 jobs:
+  # ---------------------------------------------------------------------
+  # Python: PyO3 wheels via maturin, one job per target platform.
+  # ---------------------------------------------------------------------
+  build-python:
+    name: build-python (${{ matrix.os }} / ${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: ubuntu-latest
+            target: aarch64
+          - os: macos-latest
+            target: x86_64
+          - os: macos-latest
+            target: aarch64
+          - os: windows-latest
+            target: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/python
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: bindings/python/dist
+
   publish-python:
     name: publish-python
+    needs: build-python
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-python@v5
+      - name: Download wheels
+        uses: actions/download-artifact@v4
         with:
-          python-version: "3.12"
+          pattern: python-wheels-*
+          path: dist
+          merge-multiple: true
 
-      - name: Build (release profile)
-        if: hashFiles('bindings/python/Cargo.toml') != ''
-        run: cargo build --manifest-path bindings/python/Cargo.toml --release
-
+      # Trusted publishing (OIDC) — no API token stored in this repo. The
+      # PyPI project must have this workflow registered as a trusted
+      # publisher first (one-time setup on pypi.org, not done by CI).
       - name: Publish to PyPI
-        run: |
-          echo "TODO: wire up PyPI trusted publishing (OIDC) in slice 0007"
-          exit 0
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
 
-  publish-npm:
-    name: publish-npm
+  # ---------------------------------------------------------------------
+  # TypeScript: napi-rs native addons, one job per target platform, then
+  # assembled into the per-platform optionalDependencies packages under
+  # bindings/typescript/npm/ (see `napi create-npm-dir`) and published as
+  # one `npm publish --provenance` covering the whole platform set.
+  # ---------------------------------------------------------------------
+  build-typescript:
+    name: build-typescript (${{ matrix.host }} / ${{ matrix.target }})
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            zig: true
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bindings/typescript
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # aarch64-unknown-linux-gnu is cross-compiled from the x86_64 runner
+      # via zig (napi build's built-in --zig flag) rather than a native
+      # ARM64 runner or a bespoke Docker cross image — self-contained, no
+      # extra image to keep in sync.
+      - name: Set up zig (cross-compile only)
+        if: matrix.zig
+        uses: mlugg/setup-zig@v1
+
+      - name: cargo install cargo-zigbuild (cross-compile only)
+        if: matrix.zig
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Install JS deps
+        working-directory: bindings/typescript
+        run: npm install
+
+      - name: Build native addon
+        working-directory: bindings/typescript
+        run: npx napi build --platform --release --target ${{ matrix.target }} ${{ matrix.zig && '--zig' || '' }}
+
+      - name: Upload addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-addon-${{ matrix.target }}
+          path: bindings/typescript/*.node
+
+  publish-typescript:
+    name: publish-typescript
+    needs: build-typescript
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -48,21 +156,36 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Build (release profile)
-        if: hashFiles('bindings/typescript/Cargo.toml') != ''
-        run: cargo build --manifest-path bindings/typescript/Cargo.toml --release
+      - name: Install JS deps
+        working-directory: bindings/typescript
+        run: npm install
 
-      - name: Publish to npm
+      - name: Download addons
+        uses: actions/download-artifact@v4
+        with:
+          pattern: typescript-addon-*
+          path: bindings/typescript/artifacts
+          merge-multiple: true
+
+      # Copies each platform's .node file into bindings/typescript/npm/<platform>/
+      # and syncs versions/optionalDependencies on the root package.json.
+      - name: Assemble per-platform packages
+        working-directory: bindings/typescript
         run: |
-          echo "TODO: wire up npm provenance publish (OIDC) in slice 0007"
-          exit 0
+          npx napi artifacts --dir artifacts
+          npx napi prepublish -t npm --skip-gh-release
+
+      # npm provenance needs `id-token: write` (above) plus publishing from
+      # this workflow file directly, matching the old TS SDK's --provenance
+      # pattern; registry auth still goes through the classic token secret.
+      - name: Publish to npm
+        working-directory: bindings/typescript
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,25 @@
+{
+  "name": "@z3rno/sdk-linux-x64-gnu",
+  "version": "0.23.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "z3rno-sdk-native.linux-x64-gnu.node",
+  "files": [
+    "z3rno-sdk-native.linux-x64-gnu.node"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "libc": [
+    "glibc"
+  ]
+}

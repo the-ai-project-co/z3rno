@@ -1,0 +1,22 @@
+{
+  "name": "@z3rno/sdk-darwin-x64",
+  "version": "0.23.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "z3rno-sdk-native.darwin-x64.node",
+  "files": [
+    "z3rno-sdk-native.darwin-x64.node"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

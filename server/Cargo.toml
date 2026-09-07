@@ -1,0 +1,9 @@
+[package]
+name = "z3rno-server"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "z3rno-server"
+path = "src/main.rs"

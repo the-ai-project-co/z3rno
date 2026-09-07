@@ -1,0 +1,9 @@
+[package]
+name = "z3rno-engine"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "z3rno_engine"
+path = "src/lib.rs"

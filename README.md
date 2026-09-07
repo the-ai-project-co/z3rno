@@ -29,7 +29,7 @@ Memory is organized across four tiers — working, episodic, semantic, and proce
 - **Bindings** — native compiled bindings for Python (PyO3) and TypeScript (napi-rs); the SDK *is* the engine, not a thin client.
 - **Server** — an optional Axum HTTP server for production, multi-tenant, or multi-language deployments.
 - **CLI** — a standalone binary, distributed via both crates.io and npm.
-- **Production backend** — Postgres + pgvector + Apache AGE, chosen after a spike comparing it against SurrealDB and Neo4j+Qdrant on multi-tenant isolation, operational complexity, and licensing; see `spikes/0002-backend-eval/`.
+- **Production backend** — Postgres + pgvector + Apache AGE, chosen after a spike comparing it against SurrealDB and Neo4j+Qdrant on multi-tenant isolation, operational complexity, and licensing; see `spikes/0002-backend-eval/`. Fully implemented against the same traits the embedded backend uses — see `engine/COMPATIBILITY.md`.
 
 Full architecture rationale lives in this org's internal decision and plan documents.
 
@@ -42,8 +42,9 @@ Pre-v1.0.0. Every unit of work ships as its own pull request against `main`; fol
 - **Slice 0001 — Monorepo bootstrap.** Cargo workspace (`engine`/`server`/`cli`), Python (PyO3) and TypeScript (napi-rs) binding scaffolds, CI (fmt/clippy/test).
 - **Slice 0002 — Production backend evaluation spike.** Working Rust proof-of-concepts against real, dockerized Postgres+pgvector+AGE, SurrealDB, and Neo4j+Qdrant instances, scored against a shared rubric. Decided: Postgres + pgvector + Apache AGE is the production backend slice 0004 builds against.
 - **Slice 0003 — Core engine + embedded backend.** A real, working `MemoryEngine`: `store`/`recall`/`forget` plus an append-only, hash-chained `audit` log, against SQLite (relational), an embedded vector index (`hnsw_rs`), and an embedded graph (`petgraph`) — the zero-infra default. Covers all four memory tiers end-to-end. Known gap: the embedded graph has no persistence across a restart yet ([#8](https://github.com/the-ai-project-co/z3rno/issues/8)).
+- **Slice 0004 — Production backend.** `MemoryEngine::postgres()` — Postgres + pgvector + Apache AGE against the same traits the embedded backend implements. Resolves the AGE/RLS isolation gap slice 0002 flagged (one AGE graph per tenant, not a shared graph filtered by a property). Compatibility enforcement done by making an unsupported backend combo unconstructable through the public API — see `engine/COMPATIBILITY.md`.
 
-**Up next:** slice 0004 — production backend(s) + pluggability, against the traits from 0003.1.
+**Up next:** slice 0005 — server component.
 
 ## Installation
 

@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "postgres-age-spike"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "postgres-age-spike"
+path = "src/main.rs"
+
+[dependencies]
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+rand = "0.8"
+uuid = "1"
+anyhow = "1"

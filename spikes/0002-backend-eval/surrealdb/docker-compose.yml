@@ -1,0 +1,17 @@
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    # rocksdb, not `memory`: a real self-hosted deployment persists to disk, and the
+    # rubric cares about operational realism, not just spinning something up.
+    # user: root - the image's default non-root user can't create the rocksdb
+    # dir on a fresh named volume, so run as root inside the container (same
+    # as `--user root`, which is the SurrealDB *auth* root user, unrelated).
+    user: "0:0"
+    command: start --user root --pass root --bind 0.0.0.0:8000 rocksdb:/data/db.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - surrealdb_data:/data
+
+volumes:
+  surrealdb_data:

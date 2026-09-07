@@ -1,0 +1,166 @@
+name: Release npm CLI
+
+# Builds the z3rno-cli binary for each supported platform and publishes it
+# to npm as the `z3rno` package (thin wrapper, see npm/z3rno) plus its
+# per-platform `@z3rno/cli-*` optionalDependencies (see npm/cli-*/) --
+# slice 0007.2. Same tag trigger as release-bindings.yml/release-crates.yml
+# so a single `v*.*.*` push releases every package together.
+#
+# This is a separate workflow from release-bindings.yml rather than an
+# extra job bolted onto it: the CLI binary is a plain `cargo build`
+# (native code data-plane binary, not a napi native addon), so it doesn't
+# share release-bindings.yml's napi build/assemble tooling -- only the
+# per-platform optionalDependencies *shape*, which this mirrors.
+#
+# Supply-chain provenance (decision-doc 0006 / slice 0007.6): every
+# `npm publish` here uses --provenance, matching the TypeScript SDK's
+# existing publish-typescript job in release-bindings.yml.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Build the z3rno-cli binary per target platform, staged into the
+  # matching npm/cli-<platform>/bin/ directory ready to publish.
+  # ---------------------------------------------------------------------
+  build-cli:
+    name: build-cli (${{ matrix.host }} / ${{ matrix.target }})
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            npm_pkg: cli-linux-x64-gnu
+            binary: z3rno
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            npm_pkg: cli-linux-arm64-gnu
+            binary: z3rno
+            zig: true
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            npm_pkg: cli-darwin-x64
+            binary: z3rno
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            npm_pkg: cli-darwin-arm64
+            binary: z3rno
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            npm_pkg: cli-win32-x64-msvc
+            binary: z3rno.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # aarch64-unknown-linux-gnu is cross-compiled from the x86_64 runner
+      # via zig, matching release-bindings.yml's build-typescript job.
+      - name: Set up zig (cross-compile only)
+        if: matrix.zig
+        uses: mlugg/setup-zig@v1
+
+      - name: cargo install cargo-zigbuild (cross-compile only)
+        if: matrix.zig
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Build (native)
+        if: ${{ !matrix.zig }}
+        run: cargo build --release -p z3rno-cli --target ${{ matrix.target }}
+
+      - name: Build (zig cross-compile)
+        if: matrix.zig
+        run: cargo zigbuild --release -p z3rno-cli --target ${{ matrix.target }}
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p npm/${{ matrix.npm_pkg }}/bin
+          cp target/${{ matrix.target }}/release/${{ matrix.binary }} npm/${{ matrix.npm_pkg }}/bin/${{ matrix.binary }}
+
+      - name: Upload staged binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.npm_pkg }}
+          path: npm/${{ matrix.npm_pkg }}/bin
+
+  # ---------------------------------------------------------------------
+  # Publish each per-platform package, then the root wrapper (which
+  # depends on all five via optionalDependencies already being live).
+  # ---------------------------------------------------------------------
+  publish-npm:
+    name: publish-npm
+    needs: build-cli
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download darwin-arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-darwin-arm64
+          path: npm/cli-darwin-arm64/bin
+
+      - name: Download darwin-x64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-darwin-x64
+          path: npm/cli-darwin-x64/bin
+
+      - name: Download linux-x64-gnu binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-linux-x64-gnu
+          path: npm/cli-linux-x64-gnu/bin
+
+      - name: Download linux-arm64-gnu binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-linux-arm64-gnu
+          path: npm/cli-linux-arm64-gnu/bin
+
+      - name: Download win32-x64-msvc binary
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-win32-x64-msvc
+          path: npm/cli-win32-x64-msvc/bin
+
+      - name: chmod binaries (non-Windows)
+        run: |
+          chmod +x npm/cli-darwin-arm64/bin/z3rno
+          chmod +x npm/cli-darwin-x64/bin/z3rno
+          chmod +x npm/cli-linux-x64-gnu/bin/z3rno
+          chmod +x npm/cli-linux-arm64-gnu/bin/z3rno
+
+      - name: Publish per-platform packages
+        run: |
+          for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-x64-gnu cli-linux-arm64-gnu cli-win32-x64-msvc; do
+            npm publish --access public --provenance "npm/${pkg}"
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish z3rno wrapper package
+        run: npm publish --access public --provenance npm/z3rno
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

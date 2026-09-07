@@ -3814,6 +3814,16 @@ dependencies = [
 [[package]]
 name = "z3rno-cli"
 version = "0.23.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "z3rno-engine",
+ "z3rno-server",
+]
 
 [[package]]
 name = "z3rno-engine"

@@ -3,6 +3,11 @@ name = "z3rno-engine"
 version = "0.23.0"
 edition = "2021"
 license = "Apache-2.0"
+description = "Embeddable memory engine for AI agents: store, recall, forget, and audit over vector search and a knowledge graph, backed by SQLite or Postgres."
+repository = "https://github.com/the-ai-project-co/z3rno"
+readme = "README.md"
+keywords = ["memory", "vector-search", "embeddings", "knowledge-graph", "ai-agents"]
+categories = ["database", "asynchronous"]
 
 [lib]
 name = "z3rno_engine"

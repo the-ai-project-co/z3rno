@@ -4,4 +4,6 @@ members = [
     "engine",
     "server",
     "cli",
+    "hash-embed",
+    "evals/rust",
 ]

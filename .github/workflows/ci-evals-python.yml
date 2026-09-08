@@ -1,0 +1,48 @@
+name: CI (evals/python)
+
+# Independent of the main `CI` workflow (`ci.yml`) on purpose — builds the
+# PyO3 `z3rno` bindings from source via maturin (not published to PyPI yet)
+# and runs the Python eval harness's regression-gated pytest suite against
+# the shared golden dataset.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  evals-python:
+    name: evals-python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create virtualenv
+        run: |
+          python -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build z3rno Python bindings (maturin develop)
+        run: maturin develop --manifest-path bindings/python/Cargo.toml
+
+      - name: Install z3rno-evals
+        run: pip install -e "evals/python[dev]"
+
+      - name: pytest evals/python
+        run: pytest evals/python

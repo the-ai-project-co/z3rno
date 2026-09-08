@@ -1,0 +1,10 @@
+[package]
+name = "z3rno-hash-embed"
+version = "0.23.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Naive local hashing-trick text embedding shared by z3rno-cli and the eval harnesses (no external dependencies)."
+
+[lib]
+name = "z3rno_hash_embed"
+path = "src/lib.rs"

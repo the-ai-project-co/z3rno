@@ -1,0 +1,40 @@
+name: CI (MCP server)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Create virtualenv
+        run: |
+          python -m venv .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build bindings/python (maturin develop)
+        run: maturin develop --manifest-path bindings/python/Cargo.toml
+
+      - name: Install mcp/ (with dev extras)
+        run: pip install -e "mcp[dev]"
+
+      - name: pytest mcp/tests
+        run: pytest mcp/tests

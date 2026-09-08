@@ -102,9 +102,21 @@ jobs:
         include:
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - host: ubuntu-latest
+          # Native ARM64 runner, not an x86_64-host zig cross-compile:
+          # napi build --zig generates its own linker wrapper script,
+          # separate from (and less mature than) cargo-zigbuild's own —
+          # napi-rs has an open issue to reuse cargo-zigbuild's approach
+          # but hasn't yet. It doesn't filter rustc's aarch64-linux-gnu
+          # default --fix-cortex-a53-843419 linker arg, which Zig's LLD
+          # doesn't support, and unlike a real clang/gcc driver, a later
+          # -mno-fix-cortex-a53-843419 doesn't retroactively cancel an
+          # already-injected raw -Wl, flag. Confirmed directly: the CLI
+          # binary builds this exact target fine via cargo zigbuild
+          # directly (release-npm-cli.yml) — this is specific to napi
+          # build's own zig integration, not Zig or this target in
+          # general. Building natively sidesteps the whole category.
+          - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            zig: true
           - host: macos-latest
             target: x86_64-apple-darwin
           - host: macos-latest
@@ -127,43 +139,13 @@ jobs:
         with:
           node-version: "20"
 
-      # aarch64-unknown-linux-gnu is cross-compiled from the x86_64 runner
-      # via zig (napi build's built-in --zig flag) rather than a native
-      # ARM64 runner or a bespoke Docker cross image — self-contained, no
-      # extra image to keep in sync.
-      # v2, not v1: v1 (last released 2025-05-07, abandoned since) builds
-      # the pre-0.16 download URL (zig-linux-x86_64-*.tar.xz) regardless
-      # of which Zig version is requested, but ziglang.org now serves
-      # every version, not just 0.16.0+, under the renamed
-      # zig-x86_64-linux-*.tar.xz path — confirmed directly against
-      # ziglang.org's own download index. Pinning the Zig *version* under
-      # v1 doesn't help, since the action itself builds the wrong URL no
-      # matter what version is requested. v2 is actively maintained
-      # (latest release 2026-01-19) and builds the current URL shape.
-      - name: Set up zig (cross-compile only)
-        if: matrix.zig
-        uses: mlugg/setup-zig@v2
-
-      - name: cargo install cargo-zigbuild (cross-compile only)
-        if: matrix.zig
-        run: cargo install cargo-zigbuild --locked
-
       - name: Install JS deps
         working-directory: bindings/typescript
         run: npm install
 
-      # RUSTFLAGS only matters for the zig cross-compile leg: rustc's
-      # aarch64-unknown-linux-gnu target spec auto-injects
-      # --fix-cortex-a53-843419 (an ARM erratum workaround) into the
-      # linker driver's args, which Zig's bundled LLD doesn't support
-      # ("unsupported linker arg") — -mno-fix-cortex-a53-843419 is the
-      # standard clang/gcc flag that stops the driver injecting it in
-      # the first place, rather than trying to strip it after the fact.
       - name: Build native addon
         working-directory: bindings/typescript
-        run: npx napi build --platform --release --target ${{ matrix.target }} ${{ matrix.zig && '--zig' || '' }}
-        env:
-          RUSTFLAGS: ${{ matrix.zig && '-C link-arg=-mno-fix-cortex-a53-843419' || '' }}
+        run: npx napi build --platform --release --target ${{ matrix.target }}
 
       - name: Upload addon
         uses: actions/upload-artifact@v4

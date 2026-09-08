@@ -27,11 +27,10 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@z3rno/cli"><img src="https://img.shields.io/npm/v/%40z3rno%2Fcli?label=npm%20%40z3rno%2Fcli" alt="npm CLI version"></a>
   <a href="https://www.npmjs.com/package/@z3rno/sdk"><img src="https://img.shields.io/npm/v/%40z3rno%2Fsdk?label=npm%20%40z3rno%2Fsdk" alt="npm SDK version"></a>
   <a href="https://pypi.org/project/z3rno/"><img src="https://img.shields.io/pypi/v/z3rno?label=pypi%20z3rno" alt="PyPI version"></a>
   <a href="https://crates.io/crates/z3rno-engine"><img src="https://img.shields.io/crates/v/z3rno-engine?label=crates.io%20z3rno-engine" alt="crates.io version"></a>
-  <a href="#crates">4 crates published →</a>
+  <a href="#packages">Full package list →</a>
 </p>
 
 > This repository is under active ground-up construction. It replaces the previous z3rno stack (now archived) with a single Rust monorepo. Expect rapid, breaking iteration until the v1.0.0 launch.
@@ -154,8 +153,6 @@ Full architecture rationale lives in this org's internal decision and plan docum
 
 ## Installation
 
-<a id="crates"></a>
-
 | Channel | Command |
 |---|---|
 | pip (SDK) | `pip install z3rno` |
@@ -165,6 +162,10 @@ Full architecture rationale lives in this org's internal decision and plan docum
 | npm (CLI) | `npm install -g @z3rno/cli` |
 | Docker | `docker pull ghcr.io/the-ai-project-co/z3rno/server` |
 
+<a id="packages"></a>
+
+### Packages
+
 **crates.io** — four crates, published independently:
 
 | Crate | What it is |
@@ -172,7 +173,22 @@ Full architecture rationale lives in this org's internal decision and plan docum
 | [![z3rno-engine](https://img.shields.io/crates/v/z3rno-engine?label=z3rno-engine)](https://crates.io/crates/z3rno-engine) [![downloads](https://img.shields.io/crates/d/z3rno-engine?label=downloads)](https://crates.io/crates/z3rno-engine) | The core memory engine — `cargo add z3rno-engine` |
 | [![z3rno-server](https://img.shields.io/crates/v/z3rno-server?label=z3rno-server)](https://crates.io/crates/z3rno-server) [![downloads](https://img.shields.io/crates/d/z3rno-server?label=downloads)](https://crates.io/crates/z3rno-server) | The Axum HTTP server — `cargo add z3rno-server`, or use the [Docker image](#docker) |
 | [![z3rno-cli](https://img.shields.io/crates/v/z3rno-cli?label=z3rno-cli)](https://crates.io/crates/z3rno-cli) [![downloads](https://img.shields.io/crates/d/z3rno-cli?label=downloads)](https://crates.io/crates/z3rno-cli) | The `z3rno` binary — `cargo install z3rno-cli` |
-| [![z3rno-hash-embed](https://img.shields.io/crates/v/z3rno-hash-embed?label=z3rno-hash-embed)](https://crates.io/crates/z3rno-hash-embed) [![downloads](https://img.shields.io/crates/d/z3rno-hash-embed?label=downloads)](https://crates.io/crates/z3rno-hash-embed) | The naive local hashing embedding shared by the CLI and eval harnesses | 
+| [![z3rno-hash-embed](https://img.shields.io/crates/v/z3rno-hash-embed?label=z3rno-hash-embed)](https://crates.io/crates/z3rno-hash-embed) [![downloads](https://img.shields.io/crates/d/z3rno-hash-embed?label=downloads)](https://crates.io/crates/z3rno-hash-embed) | The naive local hashing embedding shared by the CLI and eval harnesses |
+
+**npm** — two user-facing packages; each also publishes five platform-specific `optionalDependencies` packages (`-darwin-arm64`, `-darwin-x64`, `-linux-x64-gnu`, `-linux-arm64-gnu`, `-win32-x64-msvc`) that npm installs automatically and are never meant to be installed directly:
+
+| Package | What it is |
+|---|---|
+| [![@z3rno/sdk](https://img.shields.io/npm/v/%40z3rno%2Fsdk?label=%40z3rno%2Fsdk)](https://www.npmjs.com/package/@z3rno/sdk) [![downloads](https://img.shields.io/npm/dm/%40z3rno%2Fsdk?label=downloads)](https://www.npmjs.com/package/@z3rno/sdk) | The native TypeScript/Node SDK — `npm install @z3rno/sdk` |
+| [![@z3rno/cli](https://img.shields.io/npm/v/%40z3rno%2Fcli?label=%40z3rno%2Fcli)](https://www.npmjs.com/package/@z3rno/cli) [![downloads](https://img.shields.io/npm/dm/%40z3rno%2Fcli?label=downloads)](https://www.npmjs.com/package/@z3rno/cli) | The `z3rno` CLI binary — `npm install -g @z3rno/cli` |
+
+**PyPI** — three packages:
+
+| Package | What it is |
+|---|---|
+| [![z3rno](https://img.shields.io/pypi/v/z3rno?label=z3rno)](https://pypi.org/project/z3rno/) [![downloads](https://img.shields.io/pypi/dm/z3rno?label=downloads)](https://pypi.org/project/z3rno/) | The native Python SDK — `pip install z3rno` |
+| [![z3rno-mcp](https://img.shields.io/pypi/v/z3rno-mcp?label=z3rno-mcp)](https://pypi.org/project/z3rno-mcp/) [![downloads](https://img.shields.io/pypi/dm/z3rno-mcp?label=downloads)](https://pypi.org/project/z3rno-mcp/) | The MCP server — `pip install z3rno-mcp` |
+| [![z3rno-evals](https://img.shields.io/pypi/v/z3rno-evals?label=z3rno-evals)](https://pypi.org/project/z3rno-evals/) [![downloads](https://img.shields.io/pypi/dm/z3rno-evals?label=downloads)](https://pypi.org/project/z3rno-evals/) | The Python eval harness — `pip install z3rno-evals` |
 
 ## Status
 

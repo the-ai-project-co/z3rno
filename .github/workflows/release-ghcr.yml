@@ -6,6 +6,15 @@ name: Release GHCR image
 # releases every package together, plus a push to the default branch so
 # `:latest` always tracks main between tagged releases.
 #
+# Each platform builds natively on its own runner rather than QEMU
+# emulation on one x86_64 runner (the earlier approach): a live v0.23.0
+# release attempt showed the emulated linux/arm64 leg alone taking 45+
+# minutes to compile this crate's dependency tree (sqlx, tonic,
+# opentelemetry), on the outer edge of plausible-but-not-stuck. Building
+# natively (same approach as release-bindings.yml's Python aarch64 fix)
+# and merging the two single-platform images into one multi-arch
+# manifest afterward removes the emulation cost entirely.
+#
 # Supply-chain provenance (decision-doc 0006 / slice 0007.6): SLSA build
 # provenance via actions/attest-build-provenance, and an SBOM generated
 # natively by buildx/BuildKit (`sbom: true`) rather than a separate
@@ -22,8 +31,66 @@ env:
   IMAGE_NAME: ghcr.io/the-ai-project-co/z3rno-server
 
 jobs:
-  build-and-push:
-    name: build-and-push
+  build:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed by digest, not by tag: the final tags (latest, and a
+      # version tag on a release) get applied once to the merged
+      # multi-arch manifest in the merge job below, not per-platform here.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: ${{ matrix.platform }}
+          sbom: true
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: merge and push manifest
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,11 +98,12 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -57,20 +125,25 @@ jobs:
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: server/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          sbom: true
+      # Combines the two single-platform images (referenced by digest)
+      # into one multi-arch manifest list under the final tags.
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' | sed 's/^/-t /' | tr '\n' ' ') \
+            $(printf "${IMAGE_NAME}@sha256:%s " *)
+
+      - name: Inspect merged manifest
+        id: inspect
+        run: |
+          docker buildx imagetools inspect "${IMAGE_NAME}:latest" --format '{{json .Manifest}}' > /tmp/manifest.json
+          digest=$(python3 -c "import json; print(json.load(open('/tmp/manifest.json'))['digest'])")
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.inspect.outputs.digest }}
           push-to-registry: true

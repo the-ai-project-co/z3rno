@@ -1,7 +1,7 @@
 //! `/v1/memories*` — the store/recall/forget verb surface (engine::
 //! MemoryEngine) plus the one public, unauthenticated `/v1/limits` probe.
 
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -17,9 +17,10 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/v1/memories", post(store))
+        .route("/v1/memories", post(store).get(list))
         .route("/v1/memories/recall", post(recall))
         .route("/v1/memories/forget", post(forget))
+        .route("/v1/memories/{id}/neighbors", get(neighbors))
         .route("/v1/limits", get(limits))
 }
 
@@ -74,6 +75,58 @@ async fn store(
         .map_err(anyhow::Error::from)?;
 
     Ok((StatusCode::CREATED, Json(memory)))
+}
+
+#[derive(Debug, Serialize)]
+struct ListResponse {
+    results: Vec<Memory>,
+    total: usize,
+}
+
+/// Every memory for the caller's tenant — the graph visualizer's node
+/// seed; unlike `recall`, needs no query embedding since it doesn't rank
+/// by similarity, just lists what's there.
+async fn list(State(state): State<AppState>, ctx: AuthContext) -> ApiResult<Json<ListResponse>> {
+    ctx.require_role(&[Role::Admin, Role::Write, Role::Read])?;
+
+    let results = state
+        .engine
+        .advanced()
+        .list_memories(&ctx.tenant_id)
+        .await
+        .map_err(anyhow::Error::from)?;
+    let total = results.len();
+    Ok(Json(ListResponse { results, total }))
+}
+
+#[derive(Debug, Deserialize)]
+struct NeighborsQuery {
+    relationship: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct NeighborsResponse {
+    neighbors: Vec<Uuid>,
+}
+
+/// One-hop neighbor ids of a memory, optionally filtered by relationship
+/// name — the graph visualizer's per-node expansion call. No multi-hop
+/// traversal exists at any layer; this is exactly one hop.
+async fn neighbors(
+    State(state): State<AppState>,
+    ctx: AuthContext,
+    Path(id): Path<Uuid>,
+    Query(params): Query<NeighborsQuery>,
+) -> ApiResult<Json<NeighborsResponse>> {
+    ctx.require_role(&[Role::Admin, Role::Write, Role::Read])?;
+
+    let neighbors = state
+        .engine
+        .advanced()
+        .neighbors(&ctx.tenant_id, id, params.relationship.as_deref())
+        .await
+        .map_err(anyhow::Error::from)?;
+    Ok(Json(NeighborsResponse { neighbors }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -286,5 +339,100 @@ mod tests {
     async fn limits_returns_static_body() {
         let resp = limits().await;
         let _ = resp;
+    }
+
+    #[tokio::test]
+    async fn list_returns_every_stored_memory() {
+        let state = test_state();
+        let _ = store(
+            State(state.clone()),
+            ctx(Role::Admin),
+            Json(StoreRequest {
+                tier: Tier::Working,
+                content: "one".to_string(),
+                embedding: None,
+                metadata: None,
+                links: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let _ = store(
+            State(state.clone()),
+            ctx(Role::Admin),
+            Json(StoreRequest {
+                tier: Tier::Semantic,
+                content: "two".to_string(),
+                embedding: None,
+                metadata: None,
+                links: None,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let listed = list(State(state), ctx(Role::Read)).await.unwrap().0;
+        assert_eq!(listed.total, 2);
+    }
+
+    #[tokio::test]
+    async fn list_rejects_wrong_role() {
+        let state = test_state();
+        let err = list(State(state), ctx(Role::Audit)).await.unwrap_err();
+        assert!(matches!(err, ApiError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn neighbors_finds_a_linked_memory() {
+        let state = test_state();
+        let target = state
+            .engine
+            .store(
+                "test-tenant",
+                Tier::Working,
+                "target".to_string(),
+                None,
+                serde_json::Value::Null,
+                vec![],
+            )
+            .await
+            .unwrap();
+        let source = state
+            .engine
+            .store(
+                "test-tenant",
+                Tier::Working,
+                "source".to_string(),
+                None,
+                serde_json::Value::Null,
+                vec![(target.id, "relates_to".to_string())],
+            )
+            .await
+            .unwrap();
+
+        let found = neighbors(
+            State(state),
+            ctx(Role::Read),
+            Path(source.id),
+            Query(NeighborsQuery { relationship: None }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(found.neighbors, vec![target.id]);
+    }
+
+    #[tokio::test]
+    async fn neighbors_rejects_wrong_role() {
+        let state = test_state();
+        let err = neighbors(
+            State(state),
+            ctx(Role::Audit),
+            Path(Uuid::new_v4()),
+            Query(NeighborsQuery { relationship: None }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ApiError::Forbidden(_)));
     }
 }

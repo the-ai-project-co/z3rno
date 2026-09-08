@@ -42,7 +42,7 @@ EXPOSE 8080
 # for anyone who forgets to override it. Real usage must supply one:
 #
 #   docker run -e Z3RNO_JWT_SECRET=<a-real-random-secret> \
-#     -p 8080:8080 ghcr.io/the-ai-project-co/z3rno-server
+#     -p 8080:8080 ghcr.io/the-ai-project-co/z3rno/server
 #
 # Omitting it makes the container fail fast with a clear "missing required
 # argument" error instead of starting up insecurely.

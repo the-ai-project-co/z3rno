@@ -1,7 +1,7 @@
 name: Release npm CLI
 
 # Builds the z3rno-cli binary for each supported platform and publishes it
-# to npm as the `z3rno` package (thin wrapper, see npm/z3rno) plus its
+# to npm as the `@z3rno/cli` package (thin wrapper, see npm/z3rno) plus its
 # per-platform `@z3rno/cli-*` optionalDependencies (see npm/cli-*/) --
 # slice 0007.2. Same tag trigger as release-bindings.yml/release-crates.yml
 # so a single `v*.*.*` push releases every package together.
@@ -182,7 +182,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish z3rno wrapper package
+      - name: Publish @z3rno/cli wrapper package
         run: npm publish --access public --provenance ./npm/z3rno
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

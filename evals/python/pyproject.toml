@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "z3rno-evals"
-version = "0.1.0"
+version = "0.23.0"
 description = "Python eval harness for z3rno's memory engine (recall@k/MRR/faithfulness/latency against the shared golden dataset)."
 requires-python = ">=3.10"
 dependencies = []

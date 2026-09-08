@@ -1,6 +1,6 @@
 {
   "name": "@z3rno/evals",
-  "version": "0.1.0",
+  "version": "0.23.0",
   "private": true,
   "description": "TypeScript eval harness for z3rno, scored against the shared golden_v1 fixture.",
   "license": "Apache-2.0",

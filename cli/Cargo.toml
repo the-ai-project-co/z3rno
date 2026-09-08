@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 z3rno-engine = { path = "../engine" }
+z3rno-hash-embed = { path = "../hash-embed" }
 # `run`/`AppState` (server/src/lib.rs) are always-on library exports, not
 # gated by the `bin` feature that main.rs's own doc comment mentions — that
 # feature only gates z3rno-server's `[[bin]]` target (its clap/dotenvy CLI

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "z3rno-mcp"
+version = "0.1.0"
+description = "MCP server exposing z3rno's persistent memory engine (store/recall/forget/audit) as tools for LLM agents."
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0,<2.0.0",
+    "z3rno",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+z3rno-mcp = "z3rno_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

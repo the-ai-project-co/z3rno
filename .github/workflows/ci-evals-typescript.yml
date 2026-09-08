@@ -1,0 +1,51 @@
+name: CI (evals/typescript)
+
+# Builds the @z3rno/sdk native addon (bindings/typescript) and runs the
+# TypeScript eval harness (evals/typescript) against it, including the
+# regression-gated golden_v1 run. Independent of the main ci.yml workflow.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  evals-typescript:
+    name: evals-typescript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bindings/typescript
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install bindings/typescript JS deps
+        working-directory: bindings/typescript
+        run: npm install
+
+      - name: Build @z3rno/sdk native addon
+        working-directory: bindings/typescript
+        run: npm run build
+
+      - name: Install evals/typescript JS deps
+        working-directory: evals/typescript
+        run: npm install
+
+      - name: Build evals/typescript (tsc)
+        working-directory: evals/typescript
+        run: npm run build
+
+      - name: Run evals/typescript tests
+        working-directory: evals/typescript
+        run: node --test dist/test/*.test.js

@@ -3822,6 +3822,7 @@ dependencies = [
  "tokio",
  "uuid",
  "z3rno-engine",
+ "z3rno-hash-embed",
  "z3rno-server",
 ]
 
@@ -3844,6 +3845,24 @@ dependencies = [
  "tokio",
  "uuid",
 ]
+
+[[package]]
+name = "z3rno-evals"
+version = "0.23.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "z3rno-engine",
+ "z3rno-hash-embed",
+]
+
+[[package]]
+name = "z3rno-hash-embed"
+version = "0.23.0"
 
 [[package]]
 name = "z3rno-server"

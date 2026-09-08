@@ -183,17 +183,51 @@ jobs:
 
       # Copies each platform's .node file into bindings/typescript/npm/<platform>/
       # and syncs versions/optionalDependencies on the root package.json.
+      #
+      # `napi prepublish` publishes each platform package itself via a bare
+      # `spawn('npm publish')` with no error handling at all (verified
+      # directly in @napi-rs/cli's own source, scripts/index.js) -- any
+      # already-published version aborts the whole step and every platform
+      # after it never gets attempted. It DOES already skip a platform
+      # cleanly if that platform's .node file isn't present at the expected
+      # path in npm/<platform>/, so on a re-run (e.g. the tag moved again
+      # for an unrelated fix, and this version already went out for some
+      # platforms) we remove the .node file for whatever is already live on
+      # the registry before calling prepublish, so its own existing skip
+      # logic handles it instead of a hard failure.
       - name: Assemble per-platform packages
         working-directory: bindings/typescript
         run: |
           npx napi artifacts --dir artifacts
+
+          version=$(node -p "require('./package.json').version")
+          for dir in npm/*/; do
+            platform=$(basename "$dir")
+            pkg="@z3rno/sdk-${platform}"
+            if npm view "${pkg}@${version}" version >/dev/null 2>&1; then
+              echo "${pkg}@${version} already published, skipping"
+              rm -f "${dir}"z3rno-sdk-native.*.node
+            fi
+          done
+
           npx napi prepublish -t npm --skip-gh-release
 
       # npm provenance needs `id-token: write` (above) plus publishing from
       # this workflow file directly, matching the old TS SDK's --provenance
       # pattern; registry auth still goes through the classic token secret.
+      # Idempotent for the same reason as the per-platform packages above --
+      # npm's rejection of an already-published version can come back as
+      # either a 403 or, with --provenance attached, a masked 404
+      # (https://github.com/npm/cli/issues/8976).
       - name: Publish to npm
         working-directory: bindings/typescript
-        run: npm publish --access public --provenance
+        run: |
+          if ! output=$(npm publish --access public --provenance 2>&1); then
+            echo "$output"
+            echo "$output" | grep -qE "previously published|E404" || exit 1
+            echo "@z3rno/sdk already published at this version, treating as success"
+          else
+            echo "$output"
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

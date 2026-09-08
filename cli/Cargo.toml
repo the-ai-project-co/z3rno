@@ -3,6 +3,7 @@ name = "z3rno-cli"
 version = "0.23.0"
 edition = "2021"
 license = "Apache-2.0"
+description = "Standalone CLI for z3rno's memory engine (init/serve/store/recall/forget) against a local embedded store or a running z3rno-server."
 
 [[bin]]
 name = "z3rno"

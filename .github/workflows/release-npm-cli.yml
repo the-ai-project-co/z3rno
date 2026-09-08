@@ -161,15 +161,20 @@ jobs:
           chmod +x npm/cli-linux-x64-gnu/bin/z3rno
           chmod +x npm/cli-linux-arm64-gnu/bin/z3rno
 
+      # `./` prefix matters: a bare `npm/<pkg>` (single slash, no leading
+      # `./`) gets parsed by npm as a GitHub `user/repo` shorthand spec
+      # rather than a local path — confirmed directly, it tried
+      # `git ls-remote ssh://git@github.com/npm/cli-darwin-arm64.git`
+      # instead of publishing the local directory.
       - name: Publish per-platform packages
         run: |
           for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-x64-gnu cli-linux-arm64-gnu cli-win32-x64-msvc; do
-            npm publish --access public --provenance "npm/${pkg}"
+            npm publish --access public --provenance "./npm/${pkg}"
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish z3rno wrapper package
-        run: npm publish --access public --provenance npm/z3rno
+        run: npm publish --access public --provenance ./npm/z3rno
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

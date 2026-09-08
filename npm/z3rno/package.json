@@ -1,5 +1,5 @@
 {
-  "name": "z3rno",
+  "name": "@z3rno/cli",
   "version": "0.23.0",
   "description": "The z3rno CLI: bootstrap a local memory store, run the server, and store/recall memories from the command line.",
   "license": "Apache-2.0",

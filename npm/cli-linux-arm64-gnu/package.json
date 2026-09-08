@@ -2,6 +2,10 @@
   "name": "@z3rno/cli-linux-arm64-gnu",
   "version": "0.23.0",
   "description": "z3rno CLI binary for aarch64-unknown-linux-gnu",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/the-ai-project-co/z3rno"
+  },
   "os": [
     "linux"
   ],

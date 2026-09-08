@@ -76,6 +76,11 @@ mod tests {
     // covers for the disabled path.
     #[test]
     fn enabled_requires_exactly_the_string_true() {
+        // See `super::OTEL_ENV_LOCK`'s doc comment: this env var is also
+        // read by `super::tests::init_tracing_is_idempotent`, so the two
+        // tests must not interleave.
+        let _guard = super::super::OTEL_ENV_LOCK.lock().unwrap();
+
         std::env::set_var("OTEL_ENABLED", "true");
         assert!(enabled());
 

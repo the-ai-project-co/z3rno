@@ -1,9 +1,10 @@
-# z3rno
+# @z3rno/cli
 
 The `z3rno` CLI, distributed as a prebuilt native binary via npm.
 
 ```sh
-npx z3rno init
+npx @z3rno/cli init
+# or: npm install -g @z3rno/cli && z3rno init
 ```
 
 This package is a thin wrapper: it has no logic of its own beyond picking

@@ -8,6 +8,13 @@
 [![Stars](https://img.shields.io/github/stars/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/stargazers)
 [![Forks](https://img.shields.io/github/forks/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/forks)
 
+[![npm version](https://img.shields.io/npm/v/%40z3rno%2Fsdk)](https://www.npmjs.com/package/@z3rno/sdk)
+[![npm downloads](https://img.shields.io/npm/dm/%40z3rno%2Fsdk)](https://www.npmjs.com/package/@z3rno/sdk)
+[![PyPI version](https://img.shields.io/pypi/v/z3rno)](https://pypi.org/project/z3rno/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/z3rno)](https://pypi.org/project/z3rno/)
+[![crates.io version](https://img.shields.io/crates/v/z3rno-engine)](https://crates.io/crates/z3rno-engine)
+[![crates.io downloads](https://img.shields.io/crates/d/z3rno-engine)](https://crates.io/crates/z3rno-engine)
+
 **z3rno is an open-source memory engine for AI agents** — a Rust core with native Python and TypeScript bindings, embeddable with zero required infrastructure by default, with a pluggable production backend and an optional server for multi-tenant deployments.
 
 > This repository is under active ground-up construction. It replaces the previous z3rno stack (now archived) with a single Rust monorepo. Expect rapid, breaking iteration until the v1.0.0 launch.

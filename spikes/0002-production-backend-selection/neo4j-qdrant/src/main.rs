@@ -1,7 +1,7 @@
 //! Spike: Neo4j (graph) + Qdrant (vector) as two separate database services,
 //! driven from Rust via `neo4rs` (bolt) and `qdrant-client` (gRPC).
 //!
-//! Not a product — see spikes/0002-backend-eval/RUBRIC.md for what this is evidence for.
+//! Not a product — see spikes/0002-production-backend-selection/RUBRIC.md for what this is evidence for.
 
 use anyhow::{Context, Result};
 use neo4rs::{query, Graph};

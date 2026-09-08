@@ -148,7 +148,7 @@ Every quickstart above uses the embedded, zero-infra default. For a production P
 - **Bindings** — native compiled bindings for Python (PyO3) and TypeScript (napi-rs); the SDK *is* the engine, not a thin client.
 - **Server** — an optional Axum HTTP server for production, multi-tenant, or multi-language deployments.
 - **CLI** — a standalone binary, distributed via both crates.io and npm.
-- **Production backend** — Postgres + pgvector + Apache AGE, chosen after a spike comparing it against SurrealDB and Neo4j+Qdrant on multi-tenant isolation, operational complexity, and licensing; see `spikes/0002-backend-eval/`. Fully implemented against the same traits the embedded backend uses — see `engine/COMPATIBILITY.md`.
+- **Production backend** — Postgres + pgvector + Apache AGE, chosen after a spike comparing it against SurrealDB and Neo4j+Qdrant on multi-tenant isolation, operational complexity, and licensing; see `spikes/0002-production-backend-selection/`. Fully implemented against the same traits the embedded backend uses — see `engine/COMPATIBILITY.md`.
 
 Full architecture rationale lives in this org's internal decision and plan documents.
 

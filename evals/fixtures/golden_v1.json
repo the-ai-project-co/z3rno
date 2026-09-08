@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "name": "golden_v1",
+  "description": "Shared golden dataset for the Python, TypeScript, and Rust eval harnesses (slice 0008). Each harness seeds every record in `seed`, resolves each `items[].expected_seed_ids` fixture id to the real id its own store() call returned, then scores recall@k/MRR/faithfulness/latency against that resolved ground truth. All three harnesses must embed `content`/`query` text with the identical naive hashing embedding shipped in cli/src/embed.rs (FNV-1a feature hashing into 128 dims, L2-normalized) so scores are comparable across languages.",
+  "tenant_id": "eval-tenant",
+  "seed": [
+    {
+      "id": "m-001",
+      "tier": "semantic",
+      "content": "The user prefers dark mode and weekly digest emails.",
+      "metadata": {}
+    },
+    {
+      "id": "m-002",
+      "tier": "semantic",
+      "content": "The user's timezone is America/Los_Angeles.",
+      "metadata": {}
+    },
+    {
+      "id": "m-003",
+      "tier": "episodic",
+      "content": "On 2026-08-14 the user asked for a summary of the Q2 revenue report.",
+      "metadata": { "date": "2026-08-14" }
+    },
+    {
+      "id": "m-004",
+      "tier": "procedural",
+      "content": "To deploy the staging environment, run `make deploy-staging` from the infra directory.",
+      "metadata": {}
+    },
+    {
+      "id": "m-005",
+      "tier": "procedural",
+      "content": "Database migrations must be applied with `alembic upgrade head` before starting the API server.",
+      "metadata": {}
+    },
+    {
+      "id": "m-006",
+      "tier": "semantic",
+      "content": "The user's primary programming language is Rust, with Python as a secondary language.",
+      "metadata": {}
+    },
+    {
+      "id": "m-007",
+      "tier": "working",
+      "content": "Current task: refactor the authentication middleware to support API key rotation.",
+      "metadata": {}
+    },
+    {
+      "id": "m-008",
+      "tier": "episodic",
+      "content": "On 2026-08-20 the user reported a bug where recall latency spiked above 2 seconds under load.",
+      "metadata": { "date": "2026-08-20" }
+    },
+    {
+      "id": "m-009",
+      "tier": "semantic",
+      "content": "The user's team uses Linear for issue tracking and GitHub for code review.",
+      "metadata": {}
+    },
+    {
+      "id": "m-010",
+      "tier": "procedural",
+      "content": "Rolling back a deployment requires re-running the previous release's Docker image tag via `make rollback TAG=<tag>`.",
+      "metadata": {}
+    }
+  ],
+  "items": [
+    {
+      "id": "q-001",
+      "query": "What are the user's notification preferences?",
+      "expected_seed_ids": ["m-001"],
+      "expected_answer": "The user prefers dark mode and weekly digest emails.",
+      "top_k": 5,
+      "latency_budget_ms": 500,
+      "tags": ["preferences"]
+    },
+    {
+      "id": "q-002",
+      "query": "How do I deploy to staging?",
+      "expected_seed_ids": ["m-004"],
+      "expected_answer": "Run make deploy-staging from the infra directory.",
+      "top_k": 5,
+      "latency_budget_ms": 500,
+      "tags": ["procedural"]
+    },
+    {
+      "id": "q-003",
+      "query": "What programming languages does the user use?",
+      "expected_seed_ids": ["m-006"],
+      "expected_answer": "Rust is the primary language, Python is secondary.",
+      "top_k": 5,
+      "latency_budget_ms": 500,
+      "tags": ["preferences"]
+    },
+    {
+      "id": "q-004",
+      "query": "What issue tracker and code review tools does the team use?",
+      "expected_seed_ids": ["m-009"],
+      "expected_answer": "Linear for issue tracking, GitHub for code review.",
+      "top_k": 5,
+      "latency_budget_ms": 500,
+      "tags": ["tooling"]
+    },
+    {
+      "id": "q-005",
+      "query": "What deployment or rollback procedures exist?",
+      "expected_seed_ids": ["m-004", "m-010"],
+      "expected_answer": "Deploy staging with make deploy-staging; roll back with make rollback TAG=<tag>.",
+      "top_k": 5,
+      "latency_budget_ms": 500,
+      "tags": ["procedural", "multi-match"]
+    },
+    {
+      "id": "q-006",
+      "query": "What bug did the user report about performance?",
+      "expected_seed_ids": ["m-008"],
+      "expected_answer": "Recall latency spiked above 2 seconds under load.",
+      "top_k": 5,
+      "latency_budget_ms": 500,
+      "tags": ["episodic"]
+    }
+  ]
+}

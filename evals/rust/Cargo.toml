@@ -1,0 +1,22 @@
+[package]
+name = "z3rno-evals"
+version = "0.23.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Rust golden-dataset regression harness for z3rno-engine (slice 0008.4)."
+
+[lib]
+name = "z3rno_evals"
+path = "src/lib.rs"
+
+[dependencies]
+z3rno-engine = { path = "../../engine" }
+z3rno-hash-embed = { path = "../../hash-embed" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

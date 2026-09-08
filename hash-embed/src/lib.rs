@@ -20,6 +20,13 @@
 //! `store` and `recall` both call [`hash_embed`] — the exact same function
 //! — so a recall query lands in the same vector space as the memories it's
 //! meant to find.
+//!
+//! This same algorithm is reimplemented identically in the Python and
+//! TypeScript eval harnesses (`evals/python`, `evals/typescript`) so all
+//! three languages produce byte-for-byte-comparable vectors against the
+//! shared golden dataset. This crate is the single Rust source of truth
+//! for it — `z3rno-cli` and `z3rno-evals` both depend on it directly
+//! rather than each having their own copy.
 
 /// Fixed output width. 128 is small enough to stay fast and cheap to store,
 /// large enough that unrelated short phrases rarely collide into the same

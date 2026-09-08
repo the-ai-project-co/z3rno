@@ -6,14 +6,13 @@
 //! crate's `run`/`AppState`) so `npx z3rno serve` (once 0007.2 ships) is a
 //! complete local dev server.
 
-mod embed;
-
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use uuid::Uuid;
 use z3rno_engine::{MemoryEngine, Tier};
+use z3rno_hash_embed::hash_embed;
 use z3rno_server::auth::AuthConfig;
 use z3rno_server::cache::{CacheBackend, SqliteCacheBackend};
 use z3rno_server::{observability, run, AppState};
@@ -112,8 +111,9 @@ enum Command {
 
         /// Comma-separated floats, e.g. "0.1,0.2,0.3". Omit to embed
         /// `content` with the CLI's naive local hashing embedding (see
-        /// the `embed` module) — good enough to make `recall` work
-        /// out of the box, not a substitute for a real embedding model.
+        /// the `z3rno-hash-embed` crate) — good enough to make `recall`
+        /// work out of the box, not a substitute for a real embedding
+        /// model.
         #[arg(long)]
         embedding: Option<String>,
 
@@ -270,7 +270,7 @@ async fn cmd_store(
     let tier = parse_tier(&tier)?;
     let embedding = match embedding {
         Some(raw) => parse_embedding(&raw)?,
-        None => embed::hash_embed(&content),
+        None => hash_embed(&content),
     };
     let metadata = match metadata {
         Some(raw) => serde_json::from_str(&raw)
@@ -304,7 +304,7 @@ async fn cmd_recall(
     let tenant = tenant.unwrap_or_else(|| DEFAULT_TENANT.to_string());
     let embedding = match embedding {
         Some(raw) => parse_embedding(&raw)?,
-        None => embed::hash_embed(&query),
+        None => hash_embed(&query),
     };
 
     let engine = MemoryEngine::embedded(&path)?;
@@ -420,7 +420,7 @@ mod tests {
                 DEFAULT_TENANT,
                 Tier::Semantic,
                 content.to_string(),
-                Some(embed::hash_embed(content)),
+                Some(hash_embed(content)),
                 serde_json::Value::Null,
                 Vec::new(),
             )
@@ -435,7 +435,7 @@ mod tests {
                 DEFAULT_TENANT,
                 Tier::Semantic,
                 unrelated.to_string(),
-                Some(embed::hash_embed(unrelated)),
+                Some(hash_embed(unrelated)),
                 serde_json::Value::Null,
                 Vec::new(),
             )
@@ -443,7 +443,7 @@ mod tests {
             .unwrap();
 
         let results = engine
-            .recall(DEFAULT_TENANT, embed::hash_embed("quick fox"), 1)
+            .recall(DEFAULT_TENANT, hash_embed("quick fox"), 1)
             .await
             .unwrap();
 
@@ -462,7 +462,7 @@ mod tests {
                 DEFAULT_TENANT,
                 Tier::Semantic,
                 content.to_string(),
-                Some(embed::hash_embed(content)),
+                Some(hash_embed(content)),
                 serde_json::Value::Null,
                 Vec::new(),
             )
@@ -473,7 +473,7 @@ mod tests {
         assert!(proof.is_some());
 
         let results = engine
-            .recall(DEFAULT_TENANT, embed::hash_embed("quick fox"), 5)
+            .recall(DEFAULT_TENANT, hash_embed("quick fox"), 5)
             .await
             .unwrap();
         assert!(results.is_empty());

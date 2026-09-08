@@ -152,9 +152,18 @@ jobs:
         working-directory: bindings/typescript
         run: npm install
 
+      # RUSTFLAGS only matters for the zig cross-compile leg: rustc's
+      # aarch64-unknown-linux-gnu target spec auto-injects
+      # --fix-cortex-a53-843419 (an ARM erratum workaround) into the
+      # linker driver's args, which Zig's bundled LLD doesn't support
+      # ("unsupported linker arg") — -mno-fix-cortex-a53-843419 is the
+      # standard clang/gcc flag that stops the driver injecting it in
+      # the first place, rather than trying to strip it after the fact.
       - name: Build native addon
         working-directory: bindings/typescript
         run: npx napi build --platform --release --target ${{ matrix.target }} ${{ matrix.zig && '--zig' || '' }}
+        env:
+          RUSTFLAGS: ${{ matrix.zig && '-C link-arg=-mno-fix-cortex-a53-843419' || '' }}
 
       - name: Upload addon
         uses: actions/upload-artifact@v4

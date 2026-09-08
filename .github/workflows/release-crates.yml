@@ -1,14 +1,15 @@
 name: Release crates
 
 # Real publish pipeline for the crates.io-published workspace crates
-# (engine, server, cli), replacing the earlier placeholder stub
+# (engine, server, cli, hash-embed), replacing the earlier placeholder stub
 # (release-engine.yml). Same tag trigger as release-bindings.yml so a
 # single `v*.*.*` push releases every package together.
 #
 # Order matters: `cargo publish` requires a crate's path dependencies to
 # already be live on crates.io before it can be published itself, so
-# z3rno-engine goes first, then z3rno-server (depends on the engine), then
-# z3rno-cli last (depends on both).
+# z3rno-engine and z3rno-hash-embed (both leaf crates, no workspace deps)
+# go first in parallel, then z3rno-server (depends on the engine), then
+# z3rno-cli last (depends on the engine, the server, and hash-embed).
 #
 # Supply-chain provenance (decision-doc 0006 / slice 0007.6): an SBOM is
 # generated for every published crate and uploaded as a workflow artifact.
@@ -35,6 +36,25 @@ jobs:
 
       - name: Publish to crates.io
         run: cargo publish -p z3rno-engine
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-hash-embed:
+    name: publish (z3rno-hash-embed)
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish to crates.io
+        run: cargo publish -p z3rno-hash-embed
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -66,7 +86,7 @@ jobs:
 
   publish-cli:
     name: publish (z3rno-cli)
-    needs: publish-server
+    needs: [publish-server, publish-hash-embed]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -89,7 +109,7 @@ jobs:
 
   sbom:
     name: sbom
-    needs: [publish-engine, publish-server, publish-cli]
+    needs: [publish-engine, publish-hash-embed, publish-server, publish-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -105,7 +125,8 @@ jobs:
         run: cargo install cargo-cyclonedx --locked
 
       # Run from the workspace root: generates one CycloneDX SBOM per
-      # workspace member (engine/bom.json, server/bom.json, cli/bom.json).
+      # workspace member (engine/bom.json, server/bom.json, cli/bom.json,
+      # hash-embed/bom.json).
       - name: Generate SBOMs
         run: cargo cyclonedx --format json
 
@@ -117,3 +138,4 @@ jobs:
             engine/bom.json
             server/bom.json
             cli/bom.json
+            hash-embed/bom.json

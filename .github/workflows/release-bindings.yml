@@ -28,7 +28,15 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64
-          - os: ubuntu-latest
+          # Native ARM64 runner, not an x86_64-host QEMU cross-compile:
+          # PyO3 isn't built with the `abi3` feature here, so maturin
+          # needs a real matching-arch Python interpreter to link
+          # against per target version. Cross-compiling that via
+          # manylinux-in-QEMU failed outright ("couldn't find any
+          # python interpreters") rather than just being slow — the
+          # emulated container's own interpreter self-check apparently
+          # never completes. Building natively sidesteps it.
+          - os: ubuntu-24.04-arm
             target: aarch64
           - os: macos-latest
             target: x86_64
@@ -123,9 +131,15 @@ jobs:
       # via zig (napi build's built-in --zig flag) rather than a native
       # ARM64 runner or a bespoke Docker cross image — self-contained, no
       # extra image to keep in sync.
+      # Pinned below latest: mlugg/setup-zig@v1 still builds the
+      # pre-0.16 download URL (zig-linux-x86_64-*.tar.xz), but Zig 0.16.0
+      # renamed its release artifacts to zig-x86_64-linux-*.tar.xz, so
+      # "latest" 404s against every mirror and the official server alike.
       - name: Set up zig (cross-compile only)
         if: matrix.zig
         uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
 
       - name: cargo install cargo-zigbuild (cross-compile only)
         if: matrix.zig

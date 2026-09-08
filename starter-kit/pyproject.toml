@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "z3rno-starter-kit"
-version = "0.1.0"
+version = "0.23.0"
 description = "Five worked examples of z3rno's persistent memory engine: chat memory, customer support, a SQL copilot, code memory, and a research notebook."
 requires-python = ">=3.10"
 dependencies = [

@@ -1,0 +1,44 @@
+name: Release MCP server
+
+# Publish pipeline for the z3rno-mcp PyPI package (slice 0008.1's MCP
+# server). Pure-Python (setuptools, no compiled extension), so unlike
+# release-bindings.yml this needs no per-platform build matrix - one
+# sdist+wheel build covers every platform. Same tag trigger and OIDC
+# trusted-publishing pattern as release-bindings.yml's publish-python job.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish:
+    name: publish (z3rno-mcp)
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build
+        run: pip install build
+
+      - name: Build sdist and wheel
+        working-directory: mcp
+        run: python -m build
+
+      # Trusted publishing (OIDC) - no API token stored in this repo. The
+      # PyPI project must have this workflow registered as a trusted
+      # publisher first (one-time setup on pypi.org, not done by CI).
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: mcp/dist
+          skip-existing: true

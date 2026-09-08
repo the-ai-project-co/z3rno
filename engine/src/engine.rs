@@ -85,11 +85,20 @@ impl MemoryEngine {
     /// storage (SQLite + an in-process vector index + an in-process graph),
     /// no external services. This is what makes `pip install z3rno` /
     /// `npm install @z3rno/sdk` work out of the box.
+    ///
+    /// All three backends share one connection to `sqlite_path` (see
+    /// `backend::embedded::conn`) rather than each opening their own — one
+    /// file, one connection, matching the embedded module's own stated
+    /// design. Every one of them now persists across a restart: the
+    /// relational store always did, and the vector/graph backends fold
+    /// their state into the same file as of this constructor (previously
+    /// tracked as issues #21 and #8 — both in-memory-only).
     pub fn embedded<P: AsRef<Path>>(sqlite_path: P) -> BackendResult<Self> {
+        let conn = crate::backend::embedded::open_shared_connection(sqlite_path)?;
         Ok(Self::new(
-            Arc::new(SqliteEngineBackend::open(sqlite_path)?),
-            Arc::new(EmbeddedVectorBackend::default()),
-            Arc::new(EmbeddedGraphBackend::default()),
+            Arc::new(SqliteEngineBackend::with_connection(conn.clone())?),
+            Arc::new(EmbeddedVectorBackend::with_connection(conn.clone())?),
+            Arc::new(EmbeddedGraphBackend::with_connection(conn)?),
             BackendTier::Embedded,
         ))
     }

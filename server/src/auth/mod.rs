@@ -88,3 +88,67 @@ impl FromRequestParts<AppState> for AuthContext {
         extractor::authenticate(parts, state).await
     }
 }
+
+/// Claims shape signed by `issue_jwt` below — kept in exact sync with
+/// `extractor::authenticate_jwt`'s own private `Claims` (`sub`, `org_id`,
+/// `role`, `exp`, `iat`) by hand, since the two aren't allowed to share a
+/// type: `extractor`'s stays private so nothing outside this module can
+/// forge a claim without going through the one function here that's
+/// actually meant to mint one.
+#[derive(serde::Serialize)]
+struct IssuedClaims {
+    sub: String,
+    org_id: String,
+    role: String,
+    exp: usize,
+    iat: usize,
+}
+
+/// Signs a JWT this server's own auth extractor will accept for
+/// `tenant_id` with `role`, valid for `ttl_secs` from now. This is the
+/// self-service credential-issuance path #35 asked for: no database-backed
+/// API-key system, just the CLI (`z3rno token`) minting a token with the
+/// same secret the server verifies against — the same shared-secret model
+/// `--jwt-secret`/`Z3RNO_JWT_SECRET` already implies. `Role::Superadmin`
+/// isn't issuable this way (it's a pre-shared operator key, not a JWT
+/// claim — see `AuthConfig::superadmin_api_key`).
+pub fn issue_jwt(
+    jwt_secret: &str,
+    tenant_id: &str,
+    role: Role,
+    ttl_secs: i64,
+) -> anyhow::Result<String> {
+    let role_str = match role {
+        Role::Admin => "admin",
+        Role::Write => "write",
+        Role::Read => "read",
+        Role::Audit => "audit",
+        Role::Superadmin => {
+            anyhow::bail!("superadmin isn't issuable as a JWT — use --superadmin-api-key instead")
+        }
+    };
+    let now = chrono::Utc::now().timestamp();
+    let claims = IssuedClaims {
+        sub: format!("cli-issued:{tenant_id}"),
+        org_id: tenant_id.to_string(),
+        role: role_str.to_string(),
+        exp: (now + ttl_secs.max(0)) as usize,
+        iat: now as usize,
+    };
+    let token = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )?;
+    Ok(token)
+}
+
+#[cfg(test)]
+mod issue_jwt_tests {
+    use super::*;
+
+    #[test]
+    fn superadmin_is_rejected() {
+        assert!(issue_jwt("secret", "tenant-a", Role::Superadmin, 3600).is_err());
+    }
+}

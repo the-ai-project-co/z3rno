@@ -33,3 +33,4 @@ pgvector = { version = "0.4", features = ["sqlx"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

@@ -303,6 +303,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn issue_jwt_output_is_accepted_by_this_servers_own_extractor() {
+        let cache = cache().await;
+        let cfg = auth_config();
+        for (role_str, role) in [
+            ("admin", Role::Admin),
+            ("write", Role::Write),
+            ("read", Role::Read),
+            ("audit", Role::Audit),
+        ] {
+            let token = super::super::issue_jwt(SECRET, "tenant-a", role, 3600).unwrap();
+            let header = format!("Bearer {token}");
+            let ctx = authenticate_header(Some(&header), &cfg, &cache)
+                .await
+                .unwrap();
+            assert_eq!(ctx.tenant_id, "tenant-a");
+            assert_eq!(ctx.role, role, "role {role_str} round-tripped wrong");
+        }
+    }
+
+    #[tokio::test]
     async fn registered_api_key_is_looked_up_via_cache() {
         let cache = cache().await;
         let raw_key = "sk_live_abc123";

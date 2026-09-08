@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 use z3rno_engine::{MemoryEngine, Tier};
 use z3rno_hash_embed::hash_embed;
-use z3rno_server::auth::AuthConfig;
+use z3rno_server::auth::{AuthConfig, Role};
 use z3rno_server::cache::{CacheBackend, SqliteCacheBackend};
 use z3rno_server::{observability, run, AppState};
 
@@ -158,6 +158,31 @@ enum Command {
         #[arg(long, default_value = DEFAULT_DB_PATH)]
         path: String,
     },
+
+    /// Issues a JWT for a running `z3rno serve`, signed with its
+    /// --jwt-secret. z3rno-server has no user database — `--jwt-secret`
+    /// (or the `Z3RNO_JWT_SECRET` a server was started with) is the one
+    /// shared secret this command and the server's own verification both
+    /// trust; anyone who has it can mint a working token for any tenant.
+    Token {
+        /// Tenant (org) id to embed in the token.
+        #[arg(long)]
+        tenant: String,
+
+        /// One of: admin, write, read, audit.
+        #[arg(long, default_value = "admin")]
+        role: String,
+
+        /// Seconds until the token expires.
+        #[arg(long, default_value_t = 3600)]
+        ttl_secs: i64,
+
+        /// Must match the target server's --jwt-secret/Z3RNO_JWT_SECRET —
+        /// a token signed with any other secret is just as unauthorized as
+        /// no token at all.
+        #[arg(long, env = "Z3RNO_JWT_SECRET")]
+        jwt_secret: String,
+    },
 }
 
 #[tokio::main]
@@ -199,6 +224,12 @@ async fn main() -> anyhow::Result<()> {
             embedding,
         } => cmd_recall(query, tenant, path, k, embedding).await,
         Command::Forget { id, tenant, path } => cmd_forget(id, tenant, path).await,
+        Command::Token {
+            tenant,
+            role,
+            ttl_secs,
+            jwt_secret,
+        } => cmd_token(tenant, role, ttl_secs, jwt_secret),
     }
 }
 
@@ -334,6 +365,33 @@ async fn cmd_forget(id: Uuid, tenant: Option<String>, path: String) -> anyhow::R
     Ok(())
 }
 
+fn cmd_token(
+    tenant: String,
+    role: String,
+    ttl_secs: i64,
+    jwt_secret: String,
+) -> anyhow::Result<()> {
+    let role = parse_role(&role)?;
+    let token = z3rno_server::auth::issue_jwt(&jwt_secret, &tenant, role, ttl_secs)?;
+    println!("{token}");
+    Ok(())
+}
+
+/// Parses a lower-case role string into the four roles `issue_jwt` accepts
+/// (`superadmin` deliberately isn't one of them — see `Command::Token`'s
+/// doc comment and `issue_jwt`'s own).
+fn parse_role(s: &str) -> anyhow::Result<Role> {
+    match s.to_lowercase().as_str() {
+        "admin" => Ok(Role::Admin),
+        "write" => Ok(Role::Write),
+        "read" => Ok(Role::Read),
+        "audit" => Ok(Role::Audit),
+        other => anyhow::bail!(
+            "invalid role {other:?}: expected one of \"admin\", \"write\", \"read\", \"audit\""
+        ),
+    }
+}
+
 /// Parses a snake_case tier string, matching the Python/TypeScript bindings'
 /// own `parse_tier` (bindings/python/src/lib.rs, bindings/typescript/src/
 /// lib.rs) so the same tier names work everywhere z3rno is used from.
@@ -384,6 +442,33 @@ mod tests {
     #[test]
     fn parse_tier_rejects_unknown_value() {
         assert!(parse_tier("bogus").is_err());
+    }
+
+    #[test]
+    fn parse_role_accepts_every_issuable_role() {
+        assert_eq!(parse_role("admin").unwrap(), Role::Admin);
+        assert_eq!(parse_role("write").unwrap(), Role::Write);
+        assert_eq!(parse_role("read").unwrap(), Role::Read);
+        assert_eq!(parse_role("audit").unwrap(), Role::Audit);
+        assert_eq!(parse_role("Admin").unwrap(), Role::Admin);
+    }
+
+    #[test]
+    fn parse_role_rejects_superadmin_and_garbage() {
+        // Not issuable as a JWT — see `issue_jwt`'s own doc comment.
+        assert!(parse_role("superadmin").is_err());
+        assert!(parse_role("bogus").is_err());
+    }
+
+    #[test]
+    fn cmd_token_prints_a_token_the_server_would_accept() {
+        cmd_token(
+            "tenant-a".to_string(),
+            "admin".to_string(),
+            3600,
+            "shared-secret".to_string(),
+        )
+        .unwrap();
     }
 
     #[test]

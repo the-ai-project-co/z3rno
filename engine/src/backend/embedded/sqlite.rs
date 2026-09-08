@@ -17,7 +17,7 @@
 //! pushed into a high-concurrency host, revisit with `spawn_blocking`.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -26,35 +26,48 @@ use uuid::Uuid;
 
 use super::super::error::BackendResult;
 use super::super::relational::{EngineBackend, Record};
+use super::conn;
 
-/// Embedded SQLite-backed `EngineBackend`. One file, one connection guarded
-/// by a mutex — matches the single-writer, zero-infra default this crate
-/// ships with.
+/// Embedded SQLite-backed `EngineBackend`. Shares its connection with the
+/// other embedded backends (`MemoryEngine::embedded` opens one and hands
+/// each backend a clone of the `Arc`) — matches the single-writer,
+/// zero-infra default this crate ships with, one file, one connection.
 pub struct SqliteEngineBackend {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SqliteEngineBackend {
-    /// Opens (creating if missing) a SQLite file at `path` and ensures the
-    /// schema exists.
+    /// Opens (creating if missing) a SQLite file at `path`, on its own
+    /// connection, and ensures the schema exists. For standalone use
+    /// (tests, or any caller that doesn't need to share the file with the
+    /// vector/graph backends) — `MemoryEngine::embedded` uses
+    /// `with_connection` instead, so all three backends share one
+    /// connection to the same file.
     pub fn open<P: AsRef<Path>>(path: P) -> BackendResult<Self> {
-        let conn = Connection::open(path).map_err(anyhow::Error::from)?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS records (
-                id TEXT NOT NULL,
-                tenant_id TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                data TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (tenant_id, id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_records_tenant_kind
-                ON records (tenant_id, kind);",
-        )
-        .map_err(anyhow::Error::from)?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        Self::with_connection(conn::open(path)?)
+    }
+
+    /// Same as `open`, but against an existing shared connection (already
+    /// pointed at a real file or `:memory:`) rather than opening its own.
+    pub(crate) fn with_connection(conn: Arc<Mutex<Connection>>) -> BackendResult<Self> {
+        {
+            // lock poison is unrecoverable
+            let c = conn.lock().unwrap();
+            c.execute_batch(
+                "CREATE TABLE IF NOT EXISTS records (
+                    id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_records_tenant_kind
+                    ON records (tenant_id, kind);",
+            )
+            .map_err(anyhow::Error::from)?;
+        }
+        Ok(Self { conn })
     }
 
     fn row_to_record(

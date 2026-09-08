@@ -106,6 +106,24 @@ Prints a confirmation with the audit event id/hash on success, or a
 not-found message if the id doesn't exist for that tenant (a no-op, not an
 error — forgetting something already gone is not a failure).
 
+## `z3rno token`
+
+`z3rno-server` has no user database or login flow — every route under
+`/v1/memories*`, `/v1/sessions*`, and `/v1/audit` expects a JWT signed with
+the same `--jwt-secret`/`Z3RNO_JWT_SECRET` the server was started with.
+`z3rno token` mints one:
+
+```
+z3rno token --tenant acme --role admin --ttl-secs 3600 \
+  --jwt-secret <same secret the server was started with>
+```
+
+Prints the raw token to stdout — use it as `Authorization: Bearer
+<token>`. `--role` is one of `admin`/`write`/`read`/`audit` (not
+`superadmin`, which is the separate pre-shared `--superadmin-api-key`, not
+a JWT claim). Previously tracked as
+[z3rno#35](https://github.com/the-ai-project-co/z3rno/issues/35).
+
 ## Embeddings: the naive local hashing default
 
 `store` and `recall` both need a vector to do anything useful, and z3rno
@@ -129,21 +147,15 @@ each other — the naive hashing function is deterministic and used
 identically by both, so the default composes correctly on its own; mixing
 naive-hashing and real-model embeddings for the same tenant will not.
 
-## A known limitation: recall across separate CLI invocations
+## Recall across separate CLI invocations
 
-`z3rno-engine`'s embedded vector index (`EmbeddedVectorBackend`) lives
-entirely in process memory — it is not persisted to the SQLite file, only
-the relational memory record is. Tracked as
-[z3rno#21](https://github.com/the-ai-project-co/z3rno/issues/21); the same
-class of gap already tracked for the embedded graph backend as
-[z3rno#8](https://github.com/the-ai-project-co/z3rno/issues/8).
+`z3rno store` in one process and `z3rno recall` in a later, separate
+process against the same `--path` find each other correctly: the embedded
+vector index and graph (`EmbeddedVectorBackend`/`EmbeddedGraphBackend`) now
+persist to the same SQLite file as the relational memory record, and
+reload from it on open. Previously tracked as
+[z3rno#21](https://github.com/the-ai-project-co/z3rno/issues/21) and
+[z3rno#8](https://github.com/the-ai-project-co/z3rno/issues/8) — both
+fixed; kept here as history rather than deleted outright, since anyone who
+hit the old behavior and bookmarked this section should see it's resolved.
 
-Practically: each `z3rno store` / `z3rno recall` invocation opens a fresh
-`MemoryEngine::embedded(path)`, so a `store` in one process and a `recall`
-in a later, separate process will not find that memory via similarity
-search yet, even though `z3rno recall` runs correctly against whatever was
-stored earlier **in the same process** — e.g. through one long-running
-`z3rno serve` session, or the SDK bindings holding a single engine
-instance. Fixing this requires the embedded vector backend to persist and
-reload its index, which is engine-crate work outside this CLI sub-slice's
-scope; flagging it here rather than leaving it a silent surprise.

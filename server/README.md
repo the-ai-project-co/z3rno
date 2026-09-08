@@ -38,12 +38,14 @@ backend as `tenant_id|role`). Roles gate individual routes (e.g. `recall`,
 sounds**: it grants `Role::Superadmin`, which only the admin budget-override
 routes accept — it does *not* satisfy the `Admin`/`Write`/`Read` roles the
 memory/session/audit routes check, and it carries no tenant (superadmin acts
-across tenants, not within one). There is also no route or CLI command that
-issues a JWT or registers an API key — for local dev against `/v1/memories*`
-today, hand-craft an HS256 JWT (`{"sub": "...", "org_id": "<tenant>",
-"role": "admin", "exp": <unix-ts>}`, signed with whatever you passed as
-`--jwt-secret`) with any JWT library. This is a real, undocumented-until-now
-gap, filed as [z3rno#35](https://github.com/the-ai-project-co/z3rno/issues/35).
+across tenants, not within one). To get a token those routes accept, use
+`z3rno token` (see `cli/README.md`'s `z3rno token` section) — it signs a
+JWT with the same `--jwt-secret`/`Z3RNO_JWT_SECRET` this server verifies
+against, no database-backed API-key system required. Previously tracked as
+[z3rno#35](https://github.com/the-ai-project-co/z3rno/issues/35), now fixed.
+Registering an actual API key (the `tenant_id|role` cache-backed lookup
+`authenticate_api_key` already supports) still has no issuance endpoint —
+that remains a real gap if revocable, non-JWT credentials are ever wanted.
 
 ## Routes
 

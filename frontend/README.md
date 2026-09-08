@@ -27,40 +27,17 @@ by default) and an auth token, and click **Save & load**.
 
 ### Getting a usable token
 
-Neither `--superadmin-api-key` nor any CLI command currently issues a
-working token for the memory routes (`GET /v1/memories`, `.../neighbors`,
-`recall`, etc. all need `Admin`/`Write`/`Read`, which `Superadmin` doesn't
-satisfy — see `server/README.md`'s Auth section, and
-[z3rno#35](https://github.com/the-ai-project-co/z3rno/issues/35)). For local
-dev, start the server with a known `--jwt-secret` and hand-craft an HS256
-JWT signed with it:
+Start the server with a known `--jwt-secret`, then mint a token with
+`z3rno token` (previously there was no self-service way to do this — see
+[z3rno#35](https://github.com/the-ai-project-co/z3rno/issues/35), now
+fixed):
 
 ```
 z3rno serve --jwt-secret dev-secret --sqlite-path z3rno.db
+z3rno token --tenant local --role admin --jwt-secret dev-secret
 ```
 
-```python
-import hmac, hashlib, base64, json, time
-
-def b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-header = {"alg": "HS256", "typ": "JWT"}
-claims = {"sub": "dev", "org_id": "local", "role": "admin", "exp": int(time.time()) + 3600}
-signing_input = (
-    b64url(json.dumps(header, separators=(",", ":")).encode())
-    + "."
-    + b64url(json.dumps(claims, separators=(",", ":")).encode())
-)
-sig = hmac.new(b"dev-secret", signing_input.encode(), hashlib.sha256).digest()
-print(signing_input + "." + b64url(sig))
-```
-
-`org_id` is the tenant the token can see — use the same tenant you're
+`--tenant` is the tenant the token can see — use the same tenant you're
 storing memories against (`z3rno store --tenant local ...`, or the HTTP
 API's default). Paste the printed token into the frontend's "Auth token"
 field.
-
-This whole flow (server + hand-signed JWT + `curl`) was used to verify
-these routes end-to-end while building this app — see PR history for the
-exact commands.

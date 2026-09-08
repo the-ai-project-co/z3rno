@@ -1,6 +1,10 @@
 {
   "name": "@z3rno/sdk-win32-x64-msvc",
   "version": "0.23.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/the-ai-project-co/z3rno"
+  },
   "os": [
     "win32"
   ],

@@ -1,9 +1,10 @@
 //! z3rno-cli: a real, standalone CLI on top of `z3rno-engine`/`z3rno-server`
-//! (slice 0007.1) — not just a thin wrapper shell. `init`/`store`/`recall`
-//! talk to a local embedded SQLite store directly (`MemoryEngine::embedded`,
-//! same as the engine's own zero-infra default); `serve` runs the real HTTP
-//! API (`z3rno-server` as a library, see that crate's `run`/`AppState`) so
-//! `npx z3rno serve` (once 0007.2 ships) is a complete local dev server.
+//! (slice 0007.1) — not just a thin wrapper shell. `init`/`store`/`recall`/
+//! `forget` talk to a local embedded SQLite store directly
+//! (`MemoryEngine::embedded`, same as the engine's own zero-infra default);
+//! `serve` runs the real HTTP API (`z3rno-server` as a library, see that
+//! crate's `run`/`AppState`) so `npx z3rno serve` (once 0007.2 ships) is a
+//! complete local dev server.
 
 mod embed;
 
@@ -144,6 +145,19 @@ enum Command {
         #[arg(long)]
         embedding: Option<String>,
     },
+
+    /// Forget (delete) a memory by id from a local embedded store.
+    Forget {
+        /// The memory's id, as printed by `z3rno store`.
+        id: Uuid,
+
+        #[arg(long)]
+        tenant: Option<String>,
+
+        /// SQLite file to forget from.
+        #[arg(long, default_value = DEFAULT_DB_PATH)]
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -184,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
             k,
             embedding,
         } => cmd_recall(query, tenant, path, k, embedding).await,
+        Command::Forget { id, tenant, path } => cmd_forget(id, tenant, path).await,
     }
 }
 
@@ -305,6 +320,20 @@ async fn cmd_recall(
     Ok(())
 }
 
+async fn cmd_forget(id: Uuid, tenant: Option<String>, path: String) -> anyhow::Result<()> {
+    let tenant = tenant.unwrap_or_else(|| DEFAULT_TENANT.to_string());
+    let engine = MemoryEngine::embedded(&path)?;
+
+    match engine.forget(&tenant, id).await? {
+        Some(proof) => println!(
+            "Forgot {id} (audit event {}, hash {})",
+            proof.audit_event_id, proof.hash
+        ),
+        None => println!("No memory with id {id} found for tenant {tenant:?}."),
+    }
+    Ok(())
+}
+
 /// Parses a snake_case tier string, matching the Python/TypeScript bindings'
 /// own `parse_tier` (bindings/python/src/lib.rs, bindings/typescript/src/
 /// lib.rs) so the same tier names work everywhere z3rno is used from.
@@ -420,5 +449,37 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].content, content);
+    }
+
+    #[tokio::test]
+    async fn store_then_forget_removes_the_memory() {
+        let db_file = tempfile::NamedTempFile::new().unwrap();
+        let engine = MemoryEngine::embedded(db_file.path()).unwrap();
+
+        let content = "the quick brown fox jumps over the lazy dog";
+        let memory = engine
+            .store(
+                DEFAULT_TENANT,
+                Tier::Semantic,
+                content.to_string(),
+                Some(embed::hash_embed(content)),
+                serde_json::Value::Null,
+                Vec::new(),
+            )
+            .await
+            .unwrap();
+
+        let proof = engine.forget(DEFAULT_TENANT, memory.id).await.unwrap();
+        assert!(proof.is_some());
+
+        let results = engine
+            .recall(DEFAULT_TENANT, embed::hash_embed("quick fox"), 5)
+            .await
+            .unwrap();
+        assert!(results.is_empty());
+
+        // Forgetting again is a no-op, not an error.
+        let second = engine.forget(DEFAULT_TENANT, memory.id).await.unwrap();
+        assert!(second.is_none());
     }
 }

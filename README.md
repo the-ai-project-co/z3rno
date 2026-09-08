@@ -1,6 +1,12 @@
 # z3rno
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/github/license/the-ai-project-co/z3rno)](https://opensource.org/licenses/Apache-2.0)
+[![Latest tag](https://img.shields.io/github/v/tag/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/tags)
+[![Downloads](https://img.shields.io/github/downloads/the-ai-project-co/z3rno/total)](https://github.com/the-ai-project-co/z3rno/releases)
+[![Commits](https://img.shields.io/github/commit-activity/t/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/commits/main)
+[![Contributors](https://img.shields.io/github/contributors/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/graphs/contributors)
+[![Stars](https://img.shields.io/github/stars/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/stargazers)
+[![Forks](https://img.shields.io/github/forks/the-ai-project-co/z3rno)](https://github.com/the-ai-project-co/z3rno/forks)
 
 **z3rno is an open-source memory engine for AI agents** — a Rust core with native Python and TypeScript bindings, embeddable with zero required infrastructure by default, with a pluggable production backend and an optional server for multi-tenant deployments.
 

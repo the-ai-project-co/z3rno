@@ -13,6 +13,12 @@ name: Release crates
 #
 # Supply-chain provenance (decision-doc 0006 / slice 0007.6): an SBOM is
 # generated for every published crate and uploaded as a workflow artifact.
+#
+# Every publish step tolerates "already exists": crates.io versions are
+# immutable, and this pipeline has genuinely needed re-running against the
+# same tag (a downstream job failing after an upstream one already
+# succeeded) — without this, a retry gets permanently stuck behind a crate
+# that published fine the first time.
 
 on:
   push:
@@ -35,7 +41,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Publish to crates.io
-        run: cargo publish -p z3rno-engine
+        run: |
+          if ! output=$(cargo publish -p z3rno-engine 2>&1); then
+            echo "$output"
+            echo "$output" | grep -q "already exists" || exit 1
+            echo "z3rno-engine already published at this version, treating as success"
+          else
+            echo "$output"
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -54,7 +67,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Publish to crates.io
-        run: cargo publish -p z3rno-hash-embed
+        run: |
+          if ! output=$(cargo publish -p z3rno-hash-embed 2>&1); then
+            echo "$output"
+            echo "$output" | grep -q "already exists" || exit 1
+            echo "z3rno-hash-embed already published at this version, treating as success"
+          else
+            echo "$output"
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -80,7 +100,14 @@ jobs:
         run: sleep 30
 
       - name: Publish to crates.io
-        run: cargo publish -p z3rno-server
+        run: |
+          if ! output=$(cargo publish -p z3rno-server 2>&1); then
+            echo "$output"
+            echo "$output" | grep -q "already exists" || exit 1
+            echo "z3rno-server already published at this version, treating as success"
+          else
+            echo "$output"
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -103,7 +130,14 @@ jobs:
         run: sleep 30
 
       - name: Publish to crates.io
-        run: cargo publish -p z3rno-cli
+        run: |
+          if ! output=$(cargo publish -p z3rno-cli 2>&1); then
+            echo "$output"
+            echo "$output" | grep -q "already exists" || exit 1
+            echo "z3rno-cli already published at this version, treating as success"
+          else
+            echo "$output"
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

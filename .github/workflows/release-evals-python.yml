@@ -1,0 +1,46 @@
+name: Release Python evals harness
+
+# Publish pipeline for the z3rno-evals PyPI package (slice 0008.4's Python
+# eval harness). Pure-Python (setuptools, no compiled extension), so unlike
+# release-bindings.yml this needs no per-platform build matrix - one
+# sdist+wheel build covers every platform. Same tag trigger and OIDC
+# trusted-publishing pattern as release-bindings.yml's publish-python job.
+#
+# The Rust and TypeScript eval harnesses (evals/rust, evals/typescript)
+# aren't published anywhere: evals/typescript is marked "private": true
+# with a local file: dependency that would be broken on a real registry,
+# and evals/rust has no external consumer - both are internal CI tooling.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish:
+    name: publish (z3rno-evals)
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build
+        run: pip install build
+
+      - name: Build sdist and wheel
+        working-directory: evals/python
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: evals/python/dist
+          skip-existing: true

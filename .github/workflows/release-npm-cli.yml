@@ -174,15 +174,37 @@ jobs:
       # rather than a local path — confirmed directly, it tried
       # `git ls-remote ssh://git@github.com/npm/cli-darwin-arm64.git`
       # instead of publishing the local directory.
+      # Idempotent: a re-run against a version already published (e.g. the
+      # tag moved again after fixing an unrelated package) must not fail
+      # just because npm refuses to republish an existing version. npm's
+      # rejection is normally a 403 "You cannot publish over the previously
+      # published versions", but with --provenance attached it can instead
+      # come back as a plain 404 "Not Found" -- npm's own registry masks
+      # some 403s as 404 to avoid leaking package existence, and this is a
+      # documented case of that (https://github.com/npm/cli/issues/8976) --
+      # so both are treated as "already published, not a real failure".
       - name: Publish per-platform packages
         run: |
           for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-x64-gnu cli-linux-arm64-gnu cli-win32-x64-msvc; do
-            npm publish --access public --provenance "./npm/${pkg}"
+            if ! output=$(npm publish --access public --provenance "./npm/${pkg}" 2>&1); then
+              echo "$output"
+              echo "$output" | grep -qE "previously published|E404" || exit 1
+              echo "${pkg} already published at this version, treating as success"
+            else
+              echo "$output"
+            fi
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @z3rno/cli wrapper package
-        run: npm publish --access public --provenance ./npm/z3rno
+        run: |
+          if ! output=$(npm publish --access public --provenance ./npm/z3rno 2>&1); then
+            echo "$output"
+            echo "$output" | grep -qE "previously published|E404" || exit 1
+            echo "@z3rno/cli already published at this version, treating as success"
+          else
+            echo "$output"
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

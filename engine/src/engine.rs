@@ -292,4 +292,36 @@ impl Advanced<'_> {
         events.sort_by_key(|e| e.at);
         Ok(events)
     }
+
+    /// Every memory stored for `tenant_id` — 0010.2's graph visualizer
+    /// needs a starting node set, and `recall` can't provide one (it's
+    /// vector-similarity-only, requires a query embedding). Wraps the
+    /// engine backend's existing `list`, same as `audit` above.
+    pub async fn list_memories(&self, tenant_id: &str) -> BackendResult<Vec<Memory>> {
+        let records = self
+            .engine
+            .engine_backend
+            .list(tenant_id, KIND_MEMORY)
+            .await?;
+        records
+            .into_iter()
+            .map(MemoryEngine::record_to_memory)
+            .collect()
+    }
+
+    /// One-hop neighbor ids of `id`, optionally filtered by relationship
+    /// name — wraps `GraphBackend::neighbors` directly. No multi-hop
+    /// traversal exists at any layer (see `GraphBackend`'s doc comment);
+    /// callers wanting a bigger subgraph must call this repeatedly.
+    pub async fn neighbors(
+        &self,
+        tenant_id: &str,
+        id: Uuid,
+        relationship: Option<&str>,
+    ) -> BackendResult<Vec<Uuid>> {
+        self.engine
+            .graph_backend
+            .neighbors(tenant_id, id, relationship)
+            .await
+    }
 }

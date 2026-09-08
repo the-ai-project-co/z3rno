@@ -1,0 +1,33 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0b0b0e;
+  color: #e6e6e6;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 6px 8px;
+  background: #1a1a1f;
+  color: inherit;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+button {
+  cursor: pointer;
+}
+
+dt {
+  color: #888;
+  margin-top: 8px;
+}
+
+dd {
+  margin: 0;
+  word-break: break-word;
+}

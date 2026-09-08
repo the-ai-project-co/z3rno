@@ -66,15 +66,18 @@ jobs:
 
       # aarch64-unknown-linux-gnu is cross-compiled from the x86_64 runner
       # via zig, matching release-bindings.yml's build-typescript job.
-      # Pinned below latest: mlugg/setup-zig@v1 still builds the
-      # pre-0.16 download URL (zig-linux-x86_64-*.tar.xz), but Zig 0.16.0
-      # renamed its release artifacts to zig-x86_64-linux-*.tar.xz, so
-      # "latest" 404s against every mirror and the official server alike.
+      # v2, not v1: v1 (last released 2025-05-07, abandoned since) builds
+      # the pre-0.16 download URL (zig-linux-x86_64-*.tar.xz) regardless
+      # of which Zig version is requested, but ziglang.org now serves
+      # every version, not just 0.16.0+, under the renamed
+      # zig-x86_64-linux-*.tar.xz path — confirmed directly against
+      # ziglang.org's own download index. Pinning the Zig *version* under
+      # v1 doesn't help, since the action itself builds the wrong URL no
+      # matter what version is requested. v2 is actively maintained
+      # (latest release 2026-01-19) and builds the current URL shape.
       - name: Set up zig (cross-compile only)
         if: matrix.zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.15.2
+        uses: mlugg/setup-zig@v2
 
       - name: cargo install cargo-zigbuild (cross-compile only)
         if: matrix.zig

@@ -51,12 +51,25 @@ fn init_plain() {
         .try_init();
 }
 
+// `OTEL_ENABLED` is process-wide mutable state read by `init_tracing()`
+// (this module's test below) and written by `otel::enabled_requires_
+// exactly_the_string_true` (cargo test runs both in the same binary,
+// concurrently by default). Without this lock the two race: the other
+// test can leave `OTEL_ENABLED=true` visible mid-flight, routing
+// `init_tracing()` into the OTLP branch, which panics building a tonic
+// exporter outside a `#[tokio::test]` runtime.
+#[cfg(all(test, feature = "telemetry"))]
+pub(crate) static OTEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn init_tracing_is_idempotent() {
+        #[cfg(feature = "telemetry")]
+        let _guard = OTEL_ENV_LOCK.lock().unwrap();
+
         // Must not panic, with or without a prior subscriber in this
         // process (test binaries run many #[test] fns in one process).
         init_tracing();

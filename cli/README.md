@@ -1,13 +1,13 @@
 # z3rno-cli
 
 The standalone `z3rno` CLI binary (crate name `z3rno-cli`, binary name
-`z3rno`), distributed via crates.io and npm. Four subcommands: `init`,
-`serve`, `store`, `recall` — a real, useful tool against a local embedded
-store on its own, not just a wrapper around the HTTP API.
+`z3rno`), distributed via crates.io and npm. Five subcommands: `init`,
+`serve`, `store`, `recall`, `forget` — a real, useful tool against a local
+embedded store on its own, not just a wrapper around the HTTP API.
 
 ```
-cargo run --bin z3rno -- <init|serve|store|recall> ...
-# or, once installed: z3rno <init|serve|store|recall> ...
+cargo run --bin z3rno -- <init|serve|store|recall|forget> ...
+# or, once installed: z3rno <init|serve|store|recall|forget> ...
 ```
 
 Every command accepts `--tenant`; when omitted it defaults to `"local"`
@@ -89,6 +89,22 @@ z3rno recall <query>
 
 Prints one line per result: id, tier, and the (possibly truncated)
 content. Prints `No memories found.` if nothing matches.
+
+## `z3rno forget`
+
+Removes a memory by id from a local embedded store — the third of the
+engine's three headline verbs (`store`/`recall`/`forget`), alongside the two
+above.
+
+```
+z3rno forget <id>
+  [--tenant local]
+  [--path z3rno.db]
+```
+
+Prints a confirmation with the audit event id/hash on success, or a
+not-found message if the id doesn't exist for that tenant (a no-op, not an
+error — forgetting something already gone is not a failure).
 
 ## Embeddings: the naive local hashing default
 

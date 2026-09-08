@@ -37,7 +37,7 @@ telemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-ot
 redis-cache = ["dep:redis"]
 
 [dependencies]
-z3rno-engine = { path = "../engine" }
+z3rno-engine = { path = "../engine", version = "0.23.0" }
 
 axum = { version = "0.8", features = ["json", "macros"] }
 tower = { version = "0.5", features = ["util"] }

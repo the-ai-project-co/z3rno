@@ -3,7 +3,7 @@
 The real Axum HTTP API for z3rno — `store`/`recall`/`forget`/`audit` over
 a `MemoryEngine` (embedded or Postgres+pgvector+AGE), plus sessions, admin
 budget overrides, and observability. Not a scaffold — this is the same
-server shipped in the `ghcr.io/the-ai-project-co/z3rno-server` image.
+server shipped in the `ghcr.io/the-ai-project-co/z3rno/server` image.
 
 ## Running it
 
@@ -19,7 +19,7 @@ required here, with no insecure default:
 
 ```
 docker run -e Z3RNO_JWT_SECRET=<a-real-random-secret> \
-  -p 8080:8080 ghcr.io/the-ai-project-co/z3rno-server
+  -p 8080:8080 ghcr.io/the-ai-project-co/z3rno/server
 ```
 
 See `cli/README.md`'s `z3rno serve` section for the full flag/env-var list

@@ -1,7 +1,7 @@
 name: Release GHCR image
 
 # Multi-arch server image, published to
-# ghcr.io/the-ai-project-co/z3rno-server. Same tag trigger as
+# ghcr.io/the-ai-project-co/z3rno/server. Same tag trigger as
 # release-bindings.yml/release-crates.yml so a single `v*.*.*` push
 # releases every package together, plus a push to the default branch so
 # `:latest` always tracks main between tagged releases.
@@ -28,7 +28,7 @@ on:
       - "v*.*.*"
 
 env:
-  IMAGE_NAME: ghcr.io/the-ai-project-co/z3rno-server
+  IMAGE_NAME: ghcr.io/the-ai-project-co/z3rno/server
 
 jobs:
   build:

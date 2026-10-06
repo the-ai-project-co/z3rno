@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "c93883a8e44a8c98683cea6f78bedb8521849542",
+    "indexed_at": "2026-10-06T10:16:48Z",
+    "project": "z3rno-app",
+    "nodes": 1792,
+    "edges": 5424,
+    "original_size": 5439488,
+    "compressed_size": 1039243,
+    "compression_level": 9
+}

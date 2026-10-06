@@ -25,6 +25,16 @@ docker run -e Z3RNO_JWT_SECRET=<a-real-random-secret> \
 See `cli/README.md`'s `z3rno serve` section for the full flag/env-var list
 (listen address, Postgres vs. embedded backend, cache path, superadmin key).
 
+For multiple server replicas, use `Z3RNO_DATABASE_URL` for shared Postgres
+storage and set
+`Z3RNO_REDIS_URL` to a shared Redis or Valkey instance. Sessions, API-key
+verification entries, and admin budgets then use the same cache across
+replicas. Without that setting, the standalone server and the local
+`z3rno serve` command keep the SQLite cache. Setting `Z3RNO_REDIS_URL`
+on a binary built without `redis-cache` fails at startup. The published
+server image includes the optional feature; custom binaries need
+`cargo build -p z3rno-server --features redis-cache --release`.
+
 ## Auth
 
 Every route except `/v1/limits` and `/v1/health*` requires an

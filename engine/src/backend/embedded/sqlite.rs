@@ -21,8 +21,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use uuid::Uuid;
+
+use crate::audit::{AuditEvent, AuditOperation};
 
 use super::super::error::BackendResult;
 use super::super::relational::{EngineBackend, Record};
@@ -178,12 +180,51 @@ impl EngineBackend for SqliteEngineBackend {
         }
         Ok(records)
     }
+
+    async fn append_audit_event(
+        &self,
+        tenant_id: &str,
+        operation: AuditOperation,
+        memory_id: Uuid,
+    ) -> BackendResult<AuditEvent> {
+        // The shared connection lock covers the tip read and insert. A
+        // transaction makes the same guarantee across other connections to
+        // this file, including another process.
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(anyhow::Error::from)?;
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT data FROM records WHERE tenant_id = ?1 AND kind = 'audit_event'
+                 ORDER BY rowid DESC LIMIT 1",
+                params![tenant_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(anyhow::Error::from)?;
+        let prev_hash = previous
+            .map(|data| serde_json::from_str::<AuditEvent>(&data).map(|event| event.hash))
+            .transpose()
+            .map_err(anyhow::Error::from)?;
+        let event = AuditEvent::next(tenant_id, operation, memory_id, prev_hash);
+        let data = serde_json::to_string(&event).map_err(anyhow::Error::from)?;
+        tx.execute(
+            "INSERT INTO records (id, tenant_id, kind, data, created_at)
+             VALUES (?1, ?2, 'audit_event', ?3, ?4)",
+            params![event.id.to_string(), tenant_id, data, event.at.to_rfc3339()],
+        )
+        .map_err(anyhow::Error::from)?;
+        tx.commit().map_err(anyhow::Error::from)?;
+        Ok(event)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     /// A SQLite file under the OS temp dir, unique per test run, cleaned up
     /// on drop. Avoids adding a `tempfile` dependency for this one use.
@@ -272,5 +313,35 @@ mod tests {
 
         let results = backend.list("tenant-a", "memory").await.unwrap();
         assert_eq!(results, vec![a_memory]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_connections_append_one_unforked_audit_chain() {
+        let db_path = TempDbPath::new("audit-concurrent");
+        let backends = [
+            Arc::new(SqliteEngineBackend::open(&db_path.0).unwrap()),
+            Arc::new(SqliteEngineBackend::open(&db_path.0).unwrap()),
+        ];
+        let mut tasks = Vec::new();
+        for index in 0..24 {
+            let backend = Arc::clone(&backends[index % 2]);
+            tasks.push(tokio::spawn(async move {
+                backend
+                    .append_audit_event("tenant-a", AuditOperation::Store, Uuid::new_v4())
+                    .await
+                    .unwrap()
+            }));
+        }
+        let mut events = Vec::new();
+        for task in tasks {
+            events.push(task.await.unwrap());
+        }
+        assert_eq!(events.len(), 24);
+        assert!(events.iter().all(AuditEvent::is_self_consistent));
+        events.sort_by_key(|event| event.at);
+        assert!(events[0].prev_hash.is_none());
+        for pair in events.windows(2) {
+            assert_eq!(pair[1].prev_hash.as_deref(), Some(pair[0].hash.as_str()));
+        }
     }
 }

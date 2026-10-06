@@ -72,6 +72,9 @@ jobs:
       - name: "cargo test (workspace: engine, server, cli)"
         run: cargo test --workspace
 
+      - name: "cargo check (server shared cache)"
+        run: cargo check -p z3rno-server --features redis-cache
+
       - name: cargo test (bindings/python)
         if: hashFiles('bindings/python/Cargo.toml') != ''
         run: cargo test --manifest-path bindings/python/Cargo.toml

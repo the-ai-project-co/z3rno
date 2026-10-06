@@ -124,3 +124,42 @@ async fn store_creates_graph_links_that_forget_cleans_up() {
     let results = engine.recall(tenant, vec![1.0, 0.0], 10).await.unwrap();
     assert!(!results.iter().any(|m| m.id == a.id));
 }
+
+#[tokio::test]
+async fn recall_keeps_vector_rank_after_bulk_record_lookup() {
+    let db_path = temp_db_path("recall-rank");
+    let engine = MemoryEngine::embedded(&db_path).unwrap();
+    let first = engine
+        .store(
+            "tenant-a",
+            Tier::Semantic,
+            "first".into(),
+            Some(vec![1.0, 0.0]),
+            json!({}),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+    let second = engine
+        .store(
+            "tenant-a",
+            Tier::Semantic,
+            "second".into(),
+            Some(vec![0.0, 1.0]),
+            json!({}),
+            Vec::new(),
+        )
+        .await
+        .unwrap();
+
+    let results = engine.recall("tenant-a", vec![0.1, 0.9], 2).await.unwrap();
+    assert_eq!(
+        results.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![second.id, first.id]
+    );
+    assert!(engine
+        .recall("tenant-b", vec![0.1, 0.9], 2)
+        .await
+        .unwrap()
+        .is_empty());
+}

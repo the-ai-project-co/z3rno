@@ -4,6 +4,7 @@
 //! `audit` — and any future advanced operation — reachable only through
 //! `MemoryEngine::advanced()`, not as a fourth top-level method.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -203,9 +204,18 @@ impl MemoryEngine {
         k: usize,
     ) -> BackendResult<Vec<Memory>> {
         let matches = self.vector_backend.search(tenant_id, query, k).await?;
+        if matches.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids = matches.iter().map(|item| item.id).collect::<Vec<_>>();
+        let records = self.engine_backend.get_many(tenant_id, &ids).await?;
+        let mut by_id = records
+            .into_iter()
+            .map(|record| (record.id, record))
+            .collect::<HashMap<_, _>>();
         let mut memories = Vec::with_capacity(matches.len());
         for m in matches {
-            if let Some(record) = self.engine_backend.get(tenant_id, m.id).await? {
+            if let Some(record) = by_id.remove(&m.id) {
                 memories.push(Self::record_to_memory(record)?);
             }
         }
@@ -251,27 +261,9 @@ impl MemoryEngine {
         operation: AuditOperation,
         memory_id: Uuid,
     ) -> BackendResult<AuditEvent> {
-        let prev_hash = self.latest_audit_hash(tenant_id).await?;
-        let event = AuditEvent::next(tenant_id, operation, memory_id, prev_hash);
         self.engine_backend
-            .put(Record {
-                id: event.id,
-                tenant_id: tenant_id.to_string(),
-                kind: KIND_AUDIT_EVENT.to_string(),
-                data: serde_json::to_value(&event).map_err(anyhow::Error::from)?,
-                created_at: event.at,
-            })
-            .await?;
-        Ok(event)
-    }
-
-    // ponytail: O(n) scan of the tenant's whole audit log to find the chain
-    // tip. Fine at embedded scale (a local, per-process log); the
-    // production backend (slice 0004) should track the tip directly
-    // instead of re-deriving it by scanning every event on every write.
-    async fn latest_audit_hash(&self, tenant_id: &str) -> BackendResult<Option<String>> {
-        let events = self.advanced().audit(tenant_id).await?;
-        Ok(events.last().map(|e| e.hash.clone()))
+            .append_audit_event(tenant_id, operation, memory_id)
+            .await
     }
 
     fn record_to_memory(record: Record) -> BackendResult<Memory> {

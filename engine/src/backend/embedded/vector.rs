@@ -94,10 +94,9 @@ const MAX_LAYER: usize = 16;
 /// Per-tenant plain-vector store; the ANN index is built fresh per search
 /// (see module docs) rather than kept resident.
 ///
-/// `Mutex`, not `RwLock`: every method here briefly locks, does bounded
-/// work, and returns — read/write contention isn't expected to be high
-/// enough at embedded scale for `RwLock`'s extra complexity to pay for
-/// itself, and this matches `mock.rs`'s pattern.
+/// Searches clone only the requested tenant's vectors under the mutex, then
+/// rebuild the HNSW index after releasing it. The extra O(n) copy keeps an
+/// expensive search from blocking other tenants' writes.
 pub struct EmbeddedVectorBackend {
     conn: Arc<Mutex<Connection>>,
     tenants: Mutex<HashMap<String, HashMap<Uuid, Vec<f32>>>>,
@@ -231,11 +230,11 @@ impl VectorBackend for EmbeddedVectorBackend {
         query: Vec<f32>,
         k: usize,
     ) -> BackendResult<Vec<VectorMatch>> {
-        let tenants = self.tenants.lock().unwrap();
-        let Some(vectors) = tenants.get(tenant_id) else {
+        let vectors = self.tenants.lock().unwrap().get(tenant_id).cloned();
+        let Some(vectors) = vectors else {
             return Ok(Vec::new());
         };
-        Ok(search_tenant(vectors, &query, k))
+        Ok(search_tenant(&vectors, &query, k))
     }
 
     async fn delete(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {

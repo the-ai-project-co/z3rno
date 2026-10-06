@@ -8,6 +8,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::audit::{AuditEvent, AuditOperation};
+
 use super::error::BackendResult;
 use super::graph::{GraphBackend, GraphEdge};
 use super::relational::{EngineBackend, Record};
@@ -50,6 +52,37 @@ impl EngineBackend for MockEngineBackend {
             .filter(|r| r.tenant_id == tenant_id && r.kind == kind)
             .cloned()
             .collect())
+    }
+
+    async fn append_audit_event(
+        &self,
+        tenant_id: &str,
+        operation: AuditOperation,
+        memory_id: Uuid,
+    ) -> BackendResult<AuditEvent> {
+        let mut records = self.records.lock().unwrap();
+        let previous = records
+            .values()
+            .filter(|record| record.tenant_id == tenant_id && record.kind == "audit_event")
+            .max_by_key(|record| record.created_at);
+        let prev_hash = previous
+            .map(|record| {
+                serde_json::from_value::<AuditEvent>(record.data.clone()).map(|event| event.hash)
+            })
+            .transpose()
+            .map_err(anyhow::Error::from)?;
+        let event = AuditEvent::next(tenant_id, operation, memory_id, prev_hash);
+        records.insert(
+            tenant_key(tenant_id, event.id),
+            Record {
+                id: event.id,
+                tenant_id: tenant_id.to_string(),
+                kind: "audit_event".to_string(),
+                data: serde_json::to_value(&event).map_err(anyhow::Error::from)?,
+                created_at: event.at,
+            },
+        );
+        Ok(event)
     }
 }
 

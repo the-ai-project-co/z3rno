@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{CacheBackend, CacheError, CacheResult};
 
@@ -67,7 +67,8 @@ impl CacheBackend for SqliteCacheBackend {
                 params![key],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .ok();
+            .optional()
+            .map_err(|e| CacheError::Backend(e.into()))?;
 
         match row {
             None => Ok(None),
@@ -75,7 +76,8 @@ impl CacheBackend for SqliteCacheBackend {
                 // Lazily evict: expired entries are deleted on read rather
                 // than by a background sweep, since nothing here needs
                 // exact-on-expiry eviction, only "never return stale data".
-                let _ = conn.execute("DELETE FROM cache_entries WHERE key = ?1", params![key]);
+                conn.execute("DELETE FROM cache_entries WHERE key = ?1", params![key])
+                    .map_err(|e| CacheError::Backend(e.into()))?;
                 Ok(None)
             }
             Some((value, _)) => Ok(Some(value)),
@@ -146,5 +148,17 @@ mod tests {
         cache.set("k", "v1".to_string(), None).await.unwrap();
         cache.set("k", "v2".to_string(), None).await.unwrap();
         assert_eq!(cache.get("k").await.unwrap(), Some("v2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_reports_storage_failure_instead_of_a_cache_miss() {
+        let cache = SqliteCacheBackend::open_in_memory().unwrap();
+        cache
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DROP TABLE cache_entries", [])
+            .unwrap();
+        assert!(cache.get("k").await.is_err());
     }
 }

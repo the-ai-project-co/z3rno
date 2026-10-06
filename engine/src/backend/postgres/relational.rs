@@ -47,6 +47,8 @@ use async_trait::async_trait;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use crate::audit::{AuditEvent, AuditOperation};
+
 use super::super::error::BackendResult;
 use super::super::relational::{EngineBackend, Record};
 use super::provision::tenant_scoped_tx;
@@ -132,6 +134,15 @@ impl PostgresEngineBackend {
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_records_tenant_kind ON records (tenant_id, kind)",
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_records_audit_tip
+             ON records (tenant_id, created_at DESC, id DESC)
+             WHERE kind = 'audit_event'",
         )
         .execute(&mut *conn)
         .await
@@ -278,6 +289,26 @@ impl EngineBackend for PostgresEngineBackend {
         }
     }
 
+    async fn get_many(&self, tenant_id: &str, ids: &[Uuid]) -> BackendResult<Vec<Record>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut tx = tenant_scoped_tx(&self.pool, tenant_id).await?;
+        let rows = sqlx::query(
+            "SELECT id, tenant_id, kind, data, created_at FROM records
+             WHERE tenant_id = $1 AND id = ANY($2) AND kind = 'memory'",
+        )
+        .bind(tenant_id)
+        .bind(ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(anyhow::Error::from)?;
+        tx.commit().await.map_err(anyhow::Error::from)?;
+        rows.into_iter()
+            .map(|row| Self::row_to_record(row).map_err(Into::into))
+            .collect()
+    }
+
     async fn delete(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {
         let mut tx = tenant_scoped_tx(&self.pool, tenant_id).await?;
         let result = sqlx::query("DELETE FROM records WHERE id = $1 AND tenant_id = $2")
@@ -305,6 +336,54 @@ impl EngineBackend for PostgresEngineBackend {
         rows.into_iter()
             .map(|row| Self::row_to_record(row).map_err(Into::into))
             .collect()
+    }
+
+    async fn append_audit_event(
+        &self,
+        tenant_id: &str,
+        operation: AuditOperation,
+        memory_id: Uuid,
+    ) -> BackendResult<AuditEvent> {
+        let mut tx = tenant_scoped_tx(&self.pool, tenant_id).await?;
+        // Serialize a tenant's chain across pool connections and replicas.
+        // Hash collisions merely serialize unrelated tenants as well.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        let previous = sqlx::query(
+            "SELECT data FROM records
+             WHERE tenant_id = $1 AND kind = 'audit_event'
+             ORDER BY created_at DESC, id DESC LIMIT 1",
+        )
+        .bind(tenant_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(anyhow::Error::from)?;
+        let prev_hash = previous
+            .map(|row| -> anyhow::Result<String> {
+                let data: serde_json::Value = row.try_get("data")?;
+                Ok(serde_json::from_value::<AuditEvent>(data)?.hash)
+            })
+            .transpose()
+            .map_err(anyhow::Error::from)?;
+        let event = AuditEvent::next(tenant_id, operation, memory_id, prev_hash);
+        let data = serde_json::to_value(&event).map_err(anyhow::Error::from)?;
+        sqlx::query(
+            "INSERT INTO records (id, tenant_id, kind, data, created_at)
+             VALUES ($1, $2, 'audit_event', $3, $4)",
+        )
+        .bind(event.id)
+        .bind(tenant_id)
+        .bind(data)
+        .bind(event.at)
+        .execute(&mut *tx)
+        .await
+        .map_err(anyhow::Error::from)?;
+        tx.commit().await.map_err(anyhow::Error::from)?;
+        Ok(event)
     }
 }
 
@@ -436,6 +515,56 @@ mod tests {
         // tenant A can delete its own row
         assert!(backend.delete(&tenant_a, a_memory.id).await.unwrap());
         assert!(backend.get(&tenant_a, a_memory.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a running Postgres — see backend/postgres/docker-compose.dev.yml"]
+    async fn get_many_is_tenant_scoped_and_returns_only_memories() {
+        let backend = rls_enforcing_test_backend().await;
+        let tenant = unique_tenant("bulk");
+        let other = unique_tenant("other");
+        let memory = sample_record(&tenant);
+        let another = sample_record(&other);
+        let mut profile = sample_record(&tenant);
+        profile.kind = "profile".into();
+        backend.put(memory.clone()).await.unwrap();
+        backend.put(another.clone()).await.unwrap();
+        backend.put(profile.clone()).await.unwrap();
+
+        let rows = backend
+            .get_many(&tenant, &[memory.id, another.id, profile.id])
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![memory]);
+        assert!(backend.get_many(&tenant, &[]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires a running Postgres — see backend/postgres/docker-compose.dev.yml"]
+    async fn concurrent_audit_appends_form_one_chain() {
+        let backend = std::sync::Arc::new(test_backend().await);
+        let tenant = unique_tenant("audit-concurrent");
+        let mut tasks = Vec::new();
+        for _ in 0..20 {
+            let backend = std::sync::Arc::clone(&backend);
+            let tenant = tenant.clone();
+            tasks.push(tokio::spawn(async move {
+                backend
+                    .append_audit_event(&tenant, AuditOperation::Store, Uuid::new_v4())
+                    .await
+                    .unwrap()
+            }));
+        }
+        let mut events = Vec::new();
+        for task in tasks {
+            events.push(task.await.unwrap());
+        }
+        events.sort_by_key(|event| event.at);
+        assert_eq!(events.len(), 20);
+        assert!(events[0].prev_hash.is_none());
+        for pair in events.windows(2) {
+            assert_eq!(pair[1].prev_hash.as_deref(), Some(pair[0].hash.as_str()));
+        }
     }
 
     #[tokio::test]

@@ -8,6 +8,8 @@ use std::sync::Arc;
 use clap::Parser;
 use z3rno_engine::MemoryEngine;
 use z3rno_server::auth::AuthConfig;
+#[cfg(feature = "redis-cache")]
+use z3rno_server::cache::RedisCacheBackend;
 use z3rno_server::cache::{CacheBackend, SqliteCacheBackend};
 use z3rno_server::{observability, run, AppState};
 
@@ -37,6 +39,11 @@ struct Args {
     )]
     cache_sqlite_path: String,
 
+    /// Shared cache for multi-replica deployments. Requires a binary built
+    /// with the `redis-cache` feature.
+    #[arg(long, env = "Z3RNO_REDIS_URL")]
+    redis_url: Option<String>,
+
     /// Secret used to sign/verify JWTs. Required — the server refuses to
     /// start without one rather than falling back to an insecure default.
     #[arg(long, env = "Z3RNO_JWT_SECRET")]
@@ -61,7 +68,21 @@ async fn main() -> anyhow::Result<()> {
         None => MemoryEngine::embedded(&args.sqlite_path)?,
     };
 
-    let cache: Arc<dyn CacheBackend> = Arc::new(SqliteCacheBackend::open(&args.cache_sqlite_path)?);
+    let cache: Arc<dyn CacheBackend> = match args.redis_url.as_deref() {
+        #[cfg(feature = "redis-cache")]
+        Some(url) => {
+            let backend = RedisCacheBackend::connect(url)?;
+            // Client::open only validates the URL. Check connectivity before
+            // accepting traffic so a bad shared-cache config fails startup.
+            backend.get("z3rno:startup:probe").await?;
+            Arc::new(backend)
+        }
+        #[cfg(not(feature = "redis-cache"))]
+        Some(_) => anyhow::bail!(
+            "Z3RNO_REDIS_URL requires a z3rno-server build with the redis-cache feature"
+        ),
+        None => Arc::new(SqliteCacheBackend::open(&args.cache_sqlite_path)?),
+    };
 
     let state = AppState {
         engine: Arc::new(engine),

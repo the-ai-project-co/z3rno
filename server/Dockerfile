@@ -17,7 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY . .
 
-RUN cargo build --release --bin z3rno-server -p z3rno-server
+# Compile the optional shared-cache strategy into the published image. It is
+# activated only when Z3RNO_REDIS_URL is set at runtime.
+RUN cargo build --release --bin z3rno-server -p z3rno-server --features redis-cache
 
 # ---- runtime ----------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

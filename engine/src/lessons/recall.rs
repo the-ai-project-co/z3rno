@@ -50,7 +50,7 @@ impl LessonQuery {
 }
 
 /// One ranked result.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RecalledLesson {
     pub lesson: Lesson,
     /// Fused RRF score (higher is better); only meaningful within one call.

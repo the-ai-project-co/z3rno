@@ -80,3 +80,70 @@ def test_hash_embed_conformance():
             assert x == 0.0
 
     assert hash_embed("") == [0.0] * 128
+
+
+def _propose(**overrides):
+    args = dict(
+        title="Session tokens expire in UTC",
+        what_was_tried="Compared token expiry with local time.",
+        what_went_wrong="Tokens expired an hour early after DST.",
+        fix="Compare expiry in UTC.",
+        repo="acme/api",
+        paths=["src/auth/**"],
+    )
+    args.update(overrides)
+    return server.z3rno_lesson_propose(**args)
+
+
+def test_proposed_lessons_are_agent_candidates():
+    result = _propose()
+    assert result["status"] == "candidate"
+    [listed] = server.z3rno_lesson_list()
+    assert listed["id"] == result["id"]
+    assert listed["origin"] == "agent"
+    assert listed["status"] == "candidate"
+
+
+def test_dry_run_stores_nothing_and_shows_redaction():
+    secret = "ghp_" + "a1B2" * 9
+    preview = _propose(fix=f"rotate API_KEY={secret}", dry_run=True)
+    assert preview["dry_run"] is True
+    assert secret not in str(preview)
+    assert server.z3rno_lesson_list() == []
+
+
+def test_recall_is_scoped_and_candidates_need_opt_in():
+    _propose()
+    in_scope = dict(repo="acme/api", paths=["src/auth/session.rs"], text="token expiry")
+    assert server.z3rno_lesson_recall(**in_scope) == ""
+    block = server.z3rno_lesson_recall(include_candidates=True, **in_scope)
+    assert block.startswith("<z3rno_lessons")
+    assert "UNVERIFIED" in block
+    assert "Session tokens expire in UTC" in block
+    assert server.z3rno_lesson_recall(
+        repo="acme/web", paths=["src/auth/session.rs"], include_candidates=True
+    ) == ""
+    assert server.z3rno_lesson_recall(include_candidates=True) == ""
+
+
+def test_invalid_lessons_are_rejected():
+    with pytest.raises(ValueError, match="scope"):
+        _propose(repo=None)
+    with pytest.raises(ValueError):
+        _propose(what_went_wrong="")
+
+
+def test_no_tool_can_change_a_lessons_status_or_delete_it():
+    names = [n for n in dir(server) if n.startswith("z3rno_lesson_")]
+    assert sorted(names) == ["z3rno_lesson_list", "z3rno_lesson_propose", "z3rno_lesson_recall"]
+    assert server._agent()["kind"] == "agent"
+
+
+def test_store_links_create_graph_edges():
+    first = server.z3rno_store(content="CI failed on main")
+    second = server.z3rno_store(
+        content="flaky clock test", links=[{"id": first, "relationship": "caused_by"}]
+    )
+    assert second
+    with pytest.raises(ValueError):
+        server.z3rno_store(content="x", links=[{"id": first}])

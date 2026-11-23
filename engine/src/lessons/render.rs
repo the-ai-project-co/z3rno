@@ -34,7 +34,7 @@ static DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// What the renderer produced, and what it had to leave out.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Rendered {
     pub text: String,
     /// Ids actually included (callers record these as shown).

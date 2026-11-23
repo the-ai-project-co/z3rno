@@ -69,6 +69,8 @@ fn backend_error_to_pyerr(err: BackendError) -> PyErr {
     match err {
         BackendError::NotFound(msg) => PyLookupError::new_err(msg),
         BackendError::Storage(err) => PyRuntimeError::new_err(err.to_string()),
+        err @ BackendError::ForgetIncomplete { .. } => PyRuntimeError::new_err(err.to_string()),
+        err @ BackendError::Rejected { .. } => PyValueError::new_err(err.to_string()),
     }
 }
 
@@ -195,7 +197,7 @@ impl Client {
     }
 
     /// Forgets a memory, returning `None` if it was already gone, else a
-    /// dict with audit_event_id/hash as proof of erasure.
+    /// dict with audit_event_id/hash as an audit reference for the deletion.
     fn forget(&self, py: Python<'_>, tenant_id: &str, id: &str) -> PyResult<Py<PyAny>> {
         let id = Uuid::parse_str(id)
             .map_err(|e| PyValueError::new_err(format!("invalid id {id:?}: {e}")))?;

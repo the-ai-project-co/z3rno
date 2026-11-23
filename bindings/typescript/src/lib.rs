@@ -91,6 +91,10 @@ fn map_backend_error(err: BackendError) -> Error {
         BackendError::Storage(e) => {
             Error::new(Status::GenericFailure, format!("storage error: {e}"))
         }
+        err @ BackendError::ForgetIncomplete { .. } => {
+            Error::new(Status::GenericFailure, err.to_string())
+        }
+        err @ BackendError::Rejected { .. } => Error::new(Status::InvalidArg, err.to_string()),
     }
 }
 

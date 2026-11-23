@@ -3,7 +3,8 @@
 z3rno is a persistent memory engine, not a general-purpose database: it
 stores discrete memories tagged with a tier (working/episodic/semantic/
 procedural), retrieves them by vector similarity, and keeps an append-only,
-hash-chained audit log of every store/forget so erasure is provable. This
+hash-chained audit log of every store/forget (an audit reference, not an
+erasure certificate). This
 server wraps the four operations the engine actually has — store, recall,
 forget, and the one advanced op, audit — as MCP tools so an LLM agent can
 give itself persistent memory across a conversation or across sessions.
@@ -149,8 +150,10 @@ def z3rno_forget(id: str, tenant_id: str | None = None) -> str:
     this when the user asks to forget something, retracts a fact, or a
     stored memory is confirmed stale or wrong.
 
-    Erasure is proven, not silent: on success this returns a confirmation
-    naming the audit event id and hash that record the deletion. If no
+    On success this returns a confirmation naming the audit event id and
+    hash that record the deletion (an audit reference, not a certificate of
+    physical erasure). If a backing store's cleanup fails, this raises and
+    the memory stays hidden; calling it again with the same id retries. If no
     memory with that id exists (already forgotten, or never existed), this
     is reported as a plain "no memory found" message, not an error.
     """

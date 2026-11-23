@@ -169,12 +169,7 @@ async fn forget(
 ) -> ApiResult<Json<ForgetProof>> {
     ctx.require_role(&[Role::Admin, Role::Write])?;
 
-    match state
-        .engine
-        .forget(&ctx.tenant_id, body.id)
-        .await
-        .map_err(anyhow::Error::from)?
-    {
+    match state.engine.forget(&ctx.tenant_id, body.id).await? {
         Some(proof) => Ok(Json(proof)),
         None => Err(ApiError::NotFound(format!(
             "no memory {} to forget",

@@ -12,12 +12,13 @@ use uuid::Uuid;
 
 use crate::audit::{AuditEvent, AuditOperation, ForgetProof};
 use crate::backend::{
-    BackendResult, EmbeddedGraphBackend, EmbeddedVectorBackend, EngineBackend, GraphBackend,
-    Record, SqliteEngineBackend, VectorBackend,
+    BackendError, BackendResult, CleanupFailure, CleanupStep, EmbeddedGraphBackend,
+    EmbeddedVectorBackend, EngineBackend, GraphBackend, Record, SqliteEngineBackend, VectorBackend,
 };
+use crate::forget::{PendingForget, KIND_FORGET_PENDING};
 use crate::model::{Memory, Tier};
 
-const KIND_MEMORY: &str = "memory";
+pub(crate) const KIND_MEMORY: &str = "memory";
 const KIND_AUDIT_EVENT: &str = "audit_event";
 
 /// Which tenant-isolation guarantee a `MemoryEngine`'s backends provide —
@@ -51,9 +52,11 @@ pub enum BackendTier {
 /// Callers never depend on a concrete backend, only this struct and the
 /// trait interfaces it's built from.
 pub struct MemoryEngine {
-    engine_backend: Arc<dyn EngineBackend>,
-    vector_backend: Arc<dyn VectorBackend>,
-    graph_backend: Arc<dyn GraphBackend>,
+    // pub(crate) so typed-record modules (lessons) can compose the same
+    // backends; never exposed outside the crate.
+    pub(crate) engine_backend: Arc<dyn EngineBackend>,
+    pub(crate) vector_backend: Arc<dyn VectorBackend>,
+    pub(crate) graph_backend: Arc<dyn GraphBackend>,
     tier: BackendTier,
 }
 
@@ -68,7 +71,9 @@ impl MemoryEngine {
     /// embedded vector store with the Postgres relational store) for a
     /// runtime check to guard against — if that's ever built, *that's*
     /// the point to add the runtime check this constructor doesn't have.
-    fn new(
+    /// `pub(crate)` only so in-crate tests can wrap a real backend in a
+    /// fault-injecting decorator; still unreachable from outside the crate.
+    pub(crate) fn new(
         engine_backend: Arc<dyn EngineBackend>,
         vector_backend: Arc<dyn VectorBackend>,
         graph_backend: Arc<dyn GraphBackend>,
@@ -158,16 +163,20 @@ impl MemoryEngine {
             metadata,
             created_at: chrono::Utc::now(),
         };
+        self.store_memory(memory, embedding, links).await
+    }
 
-        self.engine_backend
-            .put(Record {
-                id: memory.id,
-                tenant_id: memory.tenant_id.clone(),
-                kind: KIND_MEMORY.to_string(),
-                data: serde_json::to_value(&memory).map_err(anyhow::Error::from)?,
-                created_at: memory.created_at,
-            })
-            .await?;
+    /// Persists an already-built `Memory` (relational row, optional vector,
+    /// graph node and links) and audits the store. Shared by `store` and
+    /// typed records (lessons) that need to know their id up front.
+    pub(crate) async fn store_memory(
+        &self,
+        memory: Memory,
+        embedding: Option<Vec<f32>>,
+        links: Vec<(Uuid, String)>,
+    ) -> BackendResult<Memory> {
+        let tenant_id = memory.tenant_id.as_str();
+        self.put_memory(&memory).await?;
 
         if let Some(embedding) = embedding {
             self.vector_backend
@@ -193,6 +202,19 @@ impl MemoryEngine {
             .await?;
 
         Ok(memory)
+    }
+
+    /// Writes (or overwrites in place) a memory's relational row.
+    pub(crate) async fn put_memory(&self, memory: &Memory) -> BackendResult<()> {
+        self.engine_backend
+            .put(Record {
+                id: memory.id,
+                tenant_id: memory.tenant_id.clone(),
+                kind: KIND_MEMORY.to_string(),
+                data: serde_json::to_value(memory).map_err(anyhow::Error::from)?,
+                created_at: memory.created_at,
+            })
+            .await
     }
 
     /// Recalls up to `k` memories most similar to `query`, ranked by the
@@ -223,30 +245,92 @@ impl MemoryEngine {
     }
 
     /// Removes a memory from every backend it may live in (relational,
-    /// vector, graph) and appends a `Forget` audit event as proof the
-    /// erasure happened. Returns `None` if there was nothing to forget
-    /// (already forgotten, or never existed) — no audit event is appended
-    /// for a no-op.
+    /// vector, graph). See `crate::forget` for the resumable protocol.
+    ///
+    /// - `Ok(Some(proof))`: every store is clean and a `Forget` audit event
+    ///   was appended. The proof is an audit reference, not an erasure
+    ///   certificate: it records that the engine ran the deletion.
+    /// - `Ok(None)`: nothing to forget (never existed, already fully
+    ///   forgotten, or the id isn't a memory) — no audit event.
+    /// - `Err(BackendError::ForgetIncomplete { .. })`: the memory is hidden
+    ///   from every read path, but a derived store still holds an entry.
+    ///   No audit event yet; call `forget` again to retry.
     pub async fn forget(&self, tenant_id: &str, id: Uuid) -> BackendResult<Option<ForgetProof>> {
-        let deleted = self.engine_backend.delete(tenant_id, id).await?;
-        if !deleted {
-            return Ok(None);
+        let pending = match self.engine_backend.get(tenant_id, id).await? {
+            Some(record) if record.kind == KIND_MEMORY => {
+                let pending = PendingForget::new(id);
+                // Intent first: once this row exists, every later failure
+                // is resumable.
+                self.engine_backend
+                    .put(pending.to_record(tenant_id)?)
+                    .await?;
+                self.engine_backend.delete(tenant_id, id).await?;
+                pending
+            }
+            Some(_) => return Ok(None),
+            None => match self.pending_forget(tenant_id, id).await? {
+                Some(pending) => pending,
+                None => return Ok(None),
+            },
+        };
+        self.finish_forget(tenant_id, &pending).await.map(Some)
+    }
+
+    async fn pending_forget(
+        &self,
+        tenant_id: &str,
+        memory_id: Uuid,
+    ) -> BackendResult<Option<PendingForget>> {
+        let record = self
+            .engine_backend
+            .get(tenant_id, PendingForget::record_id(memory_id))
+            .await?;
+        match record {
+            Some(record) if record.kind == KIND_FORGET_PENDING => {
+                Ok(Some(PendingForget::from_record(record)?))
+            }
+            _ => Ok(None),
         }
-        // Best-effort cleanup in the other backends — the relational store
-        // is the source of truth for "does this memory exist"; a vector or
-        // graph entry outliving its memory row is inert (never returned by
-        // `recall`, which joins back through the relational store) rather
-        // than a correctness problem.
-        let _ = self.vector_backend.delete(tenant_id, id).await;
-        let _ = self.graph_backend.remove_node(tenant_id, id).await;
+    }
+
+    /// Steps 3 and 4 of the forget protocol. Idempotent: both derived
+    /// deletes treat "already absent" as success.
+    async fn finish_forget(
+        &self,
+        tenant_id: &str,
+        pending: &PendingForget,
+    ) -> BackendResult<ForgetProof> {
+        let id = pending.memory_id;
+        let mut failures = Vec::new();
+        if let Err(err) = self.vector_backend.delete(tenant_id, id).await {
+            failures.push(CleanupFailure {
+                step: CleanupStep::Vector,
+                message: err.to_string(),
+            });
+        }
+        if let Err(err) = self.graph_backend.remove_node(tenant_id, id).await {
+            failures.push(CleanupFailure {
+                step: CleanupStep::Graph,
+                message: err.to_string(),
+            });
+        }
+        if !failures.is_empty() {
+            return Err(BackendError::ForgetIncomplete {
+                memory_id: id,
+                failures,
+            });
+        }
 
         let event = self
             .append_audit_event(tenant_id, AuditOperation::Forget, id)
             .await?;
-        Ok(Some(ForgetProof {
+        self.engine_backend
+            .delete(tenant_id, PendingForget::record_id(id))
+            .await?;
+        Ok(ForgetProof {
             audit_event_id: event.id,
             hash: event.hash,
-        }))
+        })
     }
 
     /// Advanced operations, kept out of the top-level three verbs per
@@ -266,7 +350,27 @@ impl MemoryEngine {
             .await
     }
 
-    fn record_to_memory(record: Record) -> BackendResult<Memory> {
+    /// Keeps only the ids that still have a memory row, in input order.
+    pub(crate) async fn live_memory_ids(
+        &self,
+        tenant_id: &str,
+        ids: Vec<Uuid>,
+    ) -> BackendResult<Vec<Uuid>> {
+        if ids.is_empty() {
+            return Ok(ids);
+        }
+        let live = self
+            .engine_backend
+            .get_many(tenant_id, &ids)
+            .await?
+            .into_iter()
+            .filter(|r| r.kind == KIND_MEMORY)
+            .map(|r| r.id)
+            .collect::<std::collections::HashSet<_>>();
+        Ok(ids.into_iter().filter(|id| live.contains(id)).collect())
+    }
+
+    pub(crate) fn record_to_memory(record: Record) -> BackendResult<Memory> {
         let memory: Memory = serde_json::from_value(record.data).map_err(anyhow::Error::from)?;
         Ok(memory)
     }
@@ -311,18 +415,50 @@ impl Advanced<'_> {
     }
 
     /// One-hop neighbor ids of `id`, optionally filtered by relationship
-    /// name — wraps `GraphBackend::neighbors` directly. No multi-hop
-    /// traversal exists at any layer (see `GraphBackend`'s doc comment);
-    /// callers wanting a bigger subgraph must call this repeatedly.
+    /// name. Ids are joined back through the relational store, so a graph
+    /// entry whose memory was forgotten (cleanup still pending) is never
+    /// returned.
     pub async fn neighbors(
         &self,
         tenant_id: &str,
         id: Uuid,
         relationship: Option<&str>,
     ) -> BackendResult<Vec<Uuid>> {
-        self.engine
+        let ids = self
+            .engine
             .graph_backend
             .neighbors(tenant_id, id, relationship)
-            .await
+            .await?;
+        self.engine.live_memory_ids(tenant_id, ids).await
+    }
+
+    /// Memory ids for which a `forget` was started but its derived-store
+    /// cleanup hasn't finished.
+    pub async fn pending_forgets(&self, tenant_id: &str) -> BackendResult<Vec<PendingForget>> {
+        let records = self
+            .engine
+            .engine_backend
+            .list(tenant_id, KIND_FORGET_PENDING)
+            .await?;
+        let mut pending = records
+            .into_iter()
+            .map(|r| PendingForget::from_record(r).map_err(BackendError::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        pending.sort_by_key(|p| p.requested_at);
+        Ok(pending)
+    }
+
+    /// Retries every pending forget for `tenant_id` (e.g. at startup).
+    /// Returns one result per pending memory, in request order.
+    pub async fn complete_pending_forgets(
+        &self,
+        tenant_id: &str,
+    ) -> BackendResult<Vec<(Uuid, BackendResult<ForgetProof>)>> {
+        let mut results = Vec::new();
+        for pending in self.pending_forgets(tenant_id).await? {
+            let outcome = self.engine.finish_forget(tenant_id, &pending).await;
+            results.push((pending.memory_id, outcome));
+        }
+        Ok(results)
     }
 }

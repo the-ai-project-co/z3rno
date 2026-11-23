@@ -15,7 +15,7 @@ pub(super) fn open<P: AsRef<Path>>(path: P) -> BackendResult<Arc<Mutex<Connectio
     Ok(Arc::new(Mutex::new(conn)))
 }
 
-pub(super) fn open_in_memory() -> BackendResult<Arc<Mutex<Connection>>> {
+pub(crate) fn open_in_memory() -> BackendResult<Arc<Mutex<Connection>>> {
     let conn = Connection::open_in_memory().map_err(anyhow::Error::from)?;
     Ok(Arc::new(Mutex::new(conn)))
 }

@@ -11,9 +11,11 @@ pub mod embedded;
 pub mod postgres;
 
 #[cfg(any(test, feature = "testing"))]
+pub mod faults;
+#[cfg(any(test, feature = "testing"))]
 pub mod mock;
 
-pub use error::{BackendError, BackendResult};
+pub use error::{BackendError, BackendResult, CleanupFailure, CleanupStep, ErrorCode};
 pub use graph::{GraphBackend, GraphEdge};
 pub use relational::{EngineBackend, Record};
 pub use vector::{VectorBackend, VectorMatch};

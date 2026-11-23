@@ -238,21 +238,23 @@ impl VectorBackend for EmbeddedVectorBackend {
     }
 
     async fn delete(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {
-        let removed = {
-            let mut tenants = self.tenants.lock().unwrap();
-            tenants
-                .get_mut(tenant_id)
-                .is_some_and(|vectors| vectors.remove(&id).is_some())
-        };
-        if removed {
+        // Durable row first, cache second: if the SQL delete fails, the
+        // cache still holds the entry, so a retry sees it and tries again.
+        let affected = {
             let c = self.conn.lock().unwrap();
             c.execute(
                 "DELETE FROM vectors WHERE tenant_id = ?1 AND id = ?2",
                 params![tenant_id, id.to_string()],
             )
-            .map_err(anyhow::Error::from)?;
-        }
-        Ok(removed)
+            .map_err(anyhow::Error::from)?
+        };
+        let cached = self
+            .tenants
+            .lock()
+            .unwrap()
+            .get_mut(tenant_id)
+            .is_some_and(|vectors| vectors.remove(&id).is_some());
+        Ok(affected > 0 || cached)
     }
 }
 

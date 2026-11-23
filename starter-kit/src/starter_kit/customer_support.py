@@ -6,7 +6,7 @@ able to see another's — real backend-enforced isolation, the same
 guarantee z3rno's multi-tenant Postgres backend gives production
 deployments, not an application-level filter that has to be trusted to be
 applied correctly on every query. ``forget`` demonstrates GDPR-style
-right-to-be-forgotten, with an auditable proof of erasure.
+right-to-be-forgotten, with an audit reference for each deletion.
 
 Note on scope: ``z3rno.Client.recall`` has no server-side metadata filter —
 it's pure top-k vector similarity within a tenant. The old starter kit's

@@ -47,7 +47,7 @@ z3rno gives an agent persistent memory across sessions through four operations:
 |---|---|
 | `store` | Write a memory (raw content or structured data) into the engine. |
 | `recall` | Retrieve relevant memories for a query, across configurable strategies. |
-| `forget` | Remove a memory, with an auditable proof of erasure. |
+| `forget` | Remove a memory from every store, returning an audit reference for the deletion (a retryable error if a store's cleanup is still pending). |
 | `audit` | Query the append-only, hash-chained history of what changed and when. |
 
 Memory is organized across four tiers — working, episodic, semantic, and procedural — and can be queried as vectors, as a knowledge graph, or both.

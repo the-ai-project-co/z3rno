@@ -233,30 +233,40 @@ impl GraphBackend for EmbeddedGraphBackend {
     }
 
     async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {
-        let mut tenants = self.tenants.write().unwrap();
-        let Some(tenant) = tenants.get_mut(tenant_id) else {
-            return Ok(false);
+        // Durable rows first (one transaction, so nodes and edges go
+        // together), cache second: a failed SQL delete leaves the cache
+        // intact, so a retry still finds the node and tries again.
+        let affected = {
+            let mut c = self.conn.lock().unwrap();
+            let tx = c.transaction().map_err(anyhow::Error::from)?;
+            let nodes = tx
+                .execute(
+                    "DELETE FROM graph_nodes WHERE tenant_id = ?1 AND id = ?2",
+                    params![tenant_id, id.to_string()],
+                )
+                .map_err(anyhow::Error::from)?;
+            let edges = tx
+                .execute(
+                    "DELETE FROM graph_edges WHERE tenant_id = ?1 AND (source = ?2 OR target = ?2)",
+                    params![tenant_id, id.to_string()],
+                )
+                .map_err(anyhow::Error::from)?;
+            tx.commit().map_err(anyhow::Error::from)?;
+            nodes + edges
         };
-        let Some(node) = tenant.index.remove(&id) else {
-            return Ok(false);
-        };
-        // StableDiGraph::remove_node also drops every edge incident to the
-        // node, and (unlike Graph) leaves every other NodeIndex untouched.
-        tenant.graph.remove_node(node);
-        drop(tenants);
 
-        let c = self.conn.lock().unwrap();
-        c.execute(
-            "DELETE FROM graph_nodes WHERE tenant_id = ?1 AND id = ?2",
-            params![tenant_id, id.to_string()],
-        )
-        .map_err(anyhow::Error::from)?;
-        c.execute(
-            "DELETE FROM graph_edges WHERE tenant_id = ?1 AND (source = ?2 OR target = ?2)",
-            params![tenant_id, id.to_string()],
-        )
-        .map_err(anyhow::Error::from)?;
-        Ok(true)
+        let mut tenants = self.tenants.write().unwrap();
+        let cached = tenants
+            .get_mut(tenant_id)
+            .and_then(|tenant| {
+                let node = tenant.index.remove(&id)?;
+                // StableDiGraph::remove_node also drops every edge incident
+                // to the node, and (unlike Graph) leaves every other
+                // NodeIndex untouched.
+                tenant.graph.remove_node(node)
+            })
+            .is_some();
+        Ok(affected > 0 || cached)
     }
 }
 

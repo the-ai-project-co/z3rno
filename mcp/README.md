@@ -2,7 +2,7 @@
 
 An [MCP](https://modelcontextprotocol.io) server that gives an LLM agent (Claude Desktop, Cursor, Claude Code, or any other MCP client) persistent memory backed by [z3rno](https://github.com/the-ai-project-co/z3rno)'s Rust memory engine.
 
-z3rno is a persistent memory engine, not a general-purpose database: it stores discrete memories tagged with a tier (`working`/`episodic`/`semantic`/`procedural`), retrieves them by vector similarity, and keeps an append-only, hash-chained audit log of every write and deletion so erasure is provable. This server exposes the engine's four operations — `store`, `recall`, `forget`, and the one advanced op, `audit` — as MCP tools.
+z3rno is a persistent memory engine, not a general-purpose database: it stores discrete memories tagged with a tier (`working`/`episodic`/`semantic`/`procedural`), retrieves them by vector similarity, and keeps an append-only, hash-chained audit log of every write and deletion. A forget's audit entry is a reference to the deletion the engine ran, not a certificate of physical erasure. This server exposes the engine's four operations — `store`, `recall`, `forget`, and the one advanced op, `audit` — as MCP tools.
 
 ## Config
 

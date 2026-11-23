@@ -24,6 +24,7 @@ candidate from an agent. This server has no tool that confirms, edits,
 retires or deletes a lesson; a human does that with `z3rno lesson ...`.
 """
 
+import html
 import os
 
 import z3rno
@@ -181,6 +182,8 @@ def z3rno_forget(id: str, tenant_id: str | None = None) -> str:
     the memory stays hidden; calling it again with the same id retries. If no
     memory with that id exists (already forgotten, or never existed), this
     is reported as a plain "no memory found" message, not an error.
+    Lessons can't be erased here (that raises); a human deletes them with
+    the z3rno CLI.
     """
     proof = _get_client().forget(tenant_id=tenant_id or _default_tenant(), id=id)
     if proof is None:
@@ -293,7 +296,7 @@ def z3rno_lesson_propose(
         actor=actor,
         draft=prepared,
         status="candidate",
-        embedding=hash_embed(_searchable_text(prepared)),
+        embedding=hash_embed(lessons.searchable_text(prepared)),
     )
     return {
         "id": lesson["id"],
@@ -301,14 +304,6 @@ def z3rno_lesson_propose(
         "note": "Stored as an unconfirmed candidate; a human must confirm it "
         "before it is recalled by default.",
     }
-
-
-def _searchable_text(draft: dict) -> str:
-    """Mirrors the engine's LessonDraft::searchable_text so lesson vectors
-    and query vectors land in the same hashing space."""
-    parts = [draft["title"], draft["what_was_tried"], draft["what_went_wrong"], draft["fix"]]
-    parts += [e["text"] for e in draft.get("evidence", [])]
-    return "\n".join(parts)
 
 
 @mcp.tool()
@@ -377,7 +372,8 @@ def z3rno_lesson_list(
         {
             "id": l["id"],
             "status": l["status"],
-            "title": l["title"],
+            # Titles are agent-written; escape them like the recall block does.
+            "title": html.escape(l["title"], quote=False),
             "repo": l["scope"].get("repo"),
             "origin": l["origin"]["kind"],
         }

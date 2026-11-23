@@ -11,12 +11,12 @@
 
 use std::sync::{Arc, OnceLock};
 
-use pyo3::exceptions::{PyLookupError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyLookupError, PyPermissionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-use z3rno_engine::backend::BackendError;
+use z3rno_engine::backend::{BackendError, ErrorCode};
 use z3rno_engine::lessons::{
     render_for_agent, Actor, LessonDraft, LessonFilter, LessonQuery, LessonStatus, Transition,
 };
@@ -73,6 +73,10 @@ fn backend_error_to_pyerr(err: BackendError) -> PyErr {
         BackendError::NotFound(msg) => PyLookupError::new_err(msg),
         BackendError::Storage(err) => PyRuntimeError::new_err(err.to_string()),
         err @ BackendError::ForgetIncomplete { .. } => PyRuntimeError::new_err(err.to_string()),
+        err @ BackendError::Rejected {
+            code: ErrorCode::NotPermitted,
+            ..
+        } => PyPermissionError::new_err(err.to_string()),
         err @ BackendError::Rejected { .. } => PyValueError::new_err(err.to_string()),
     }
 }
@@ -266,6 +270,14 @@ impl Lessons {
             .prepare(draft)
             .map_err(backend_error_to_pyerr)?;
         Ok(pythonize(py, &prepared)?.unbind())
+    }
+
+    /// The text the engine embeds for `draft`, so callers embed lessons
+    /// in the same space as the engine without re-implementing it.
+    #[staticmethod]
+    fn searchable_text(draft: Bound<'_, PyAny>) -> PyResult<String> {
+        let draft: LessonDraft = depythonize(&draft)?;
+        Ok(draft.searchable_text())
     }
 
     /// Stores a new lesson (`status` "candidate" or, for a human,

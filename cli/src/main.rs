@@ -6,6 +6,8 @@
 //! crate's `run`/`AppState`) so `npx z3rno serve` (once 0007.2 ships) is a
 //! complete local dev server.
 
+mod lessons;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -159,6 +161,9 @@ enum Command {
         path: String,
     },
 
+    /// Author, review and recall lessons (see `z3rno lesson --help`).
+    Lesson(lessons::LessonArgs),
+
     /// Issues a JWT for a running `z3rno serve`, signed with its
     /// --jwt-secret. z3rno-server has no user database — `--jwt-secret`
     /// (or the `Z3RNO_JWT_SECRET` a server was started with) is the one
@@ -224,6 +229,7 @@ async fn main() -> anyhow::Result<()> {
             embedding,
         } => cmd_recall(query, tenant, path, k, embedding).await,
         Command::Forget { id, tenant, path } => cmd_forget(id, tenant, path).await,
+        Command::Lesson(args) => lessons::run(args).await,
         Command::Token {
             tenant,
             role,

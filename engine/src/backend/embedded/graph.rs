@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use super::conn;
 use crate::backend::error::BackendResult;
-use crate::backend::graph::{GraphBackend, GraphEdge};
+use crate::backend::graph::{EdgeDirection, GraphBackend, GraphEdge};
 
 /// One tenant's graph: node weights are the memory node `Uuid`s, edge
 /// weights are relationship names. `StableDiGraph` (not `Graph`) is load
@@ -211,12 +211,13 @@ impl GraphBackend for EmbeddedGraphBackend {
         Ok(())
     }
 
-    async fn neighbors(
+    async fn edges(
         &self,
         tenant_id: &str,
         id: Uuid,
         relationship: Option<&str>,
-    ) -> BackendResult<Vec<Uuid>> {
+        direction: EdgeDirection,
+    ) -> BackendResult<Vec<GraphEdge>> {
         let tenants = self.tenants.read().unwrap();
         let Some(tenant) = tenants.get(tenant_id) else {
             return Ok(Vec::new());
@@ -224,12 +225,61 @@ impl GraphBackend for EmbeddedGraphBackend {
         let Some(&node) = tenant.index.get(&id) else {
             return Ok(Vec::new());
         };
-        Ok(tenant
-            .graph
-            .edges_directed(node, Direction::Outgoing)
+        let g = &tenant.graph;
+        let outgoing = direction
+            .includes_outgoing()
+            .then(|| g.edges_directed(node, Direction::Outgoing));
+        let incoming = direction
+            .includes_incoming()
+            .then(|| g.edges_directed(node, Direction::Incoming));
+        Ok(outgoing
+            .into_iter()
+            .flatten()
+            .chain(incoming.into_iter().flatten())
             .filter(|e| relationship.is_none_or(|r| r == e.weight()))
-            .map(|e| tenant.graph[e.target()])
+            .map(|e| GraphEdge {
+                source: g[e.source()],
+                target: g[e.target()],
+                relationship: e.weight().clone(),
+            })
             .collect())
+    }
+
+    async fn remove_edge(&self, tenant_id: &str, edge: &GraphEdge) -> BackendResult<bool> {
+        let affected = {
+            let c = self.conn.lock().unwrap();
+            c.execute(
+                "DELETE FROM graph_edges
+                 WHERE tenant_id = ?1 AND source = ?2 AND target = ?3 AND relationship = ?4",
+                params![
+                    tenant_id,
+                    edge.source.to_string(),
+                    edge.target.to_string(),
+                    edge.relationship,
+                ],
+            )
+            .map_err(anyhow::Error::from)?
+        };
+        let mut tenants = self.tenants.write().unwrap();
+        let mut cached = false;
+        if let Some(tenant) = tenants.get_mut(tenant_id) {
+            if let (Some(&s), Some(&t)) = (
+                tenant.index.get(&edge.source),
+                tenant.index.get(&edge.target),
+            ) {
+                let doomed: Vec<_> = tenant
+                    .graph
+                    .edges_connecting(s, t)
+                    .filter(|e| *e.weight() == edge.relationship)
+                    .map(|e| e.id())
+                    .collect();
+                cached = !doomed.is_empty();
+                for e in doomed {
+                    tenant.graph.remove_edge(e);
+                }
+            }
+        }
+        Ok(affected > 0 || cached)
     }
 
     async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {

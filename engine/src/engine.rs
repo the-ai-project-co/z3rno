@@ -379,7 +379,7 @@ impl MemoryEngine {
 /// Advanced operations namespace — `engine.advanced().audit(...)`, never a
 /// top-level `MemoryEngine` method.
 pub struct Advanced<'a> {
-    engine: &'a MemoryEngine,
+    pub(crate) engine: &'a MemoryEngine,
 }
 
 impl Advanced<'_> {

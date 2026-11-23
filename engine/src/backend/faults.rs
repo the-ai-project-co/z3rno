@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use super::error::{BackendError, BackendResult};
-use super::graph::{GraphBackend, GraphEdge};
+use super::graph::{EdgeDirection, GraphBackend, GraphEdge};
 use super::vector::{VectorBackend, VectorMatch};
 
 /// Consumes one unit of a "fail the next N calls" budget, returning the
@@ -97,13 +97,20 @@ impl GraphBackend for FaultyGraph {
         self.inner.add_edge(tenant_id, edge).await
     }
 
-    async fn neighbors(
+    async fn edges(
         &self,
         tenant_id: &str,
         id: Uuid,
         relationship: Option<&str>,
-    ) -> BackendResult<Vec<Uuid>> {
-        self.inner.neighbors(tenant_id, id, relationship).await
+        direction: EdgeDirection,
+    ) -> BackendResult<Vec<GraphEdge>> {
+        self.inner
+            .edges(tenant_id, id, relationship, direction)
+            .await
+    }
+
+    async fn remove_edge(&self, tenant_id: &str, edge: &GraphEdge) -> BackendResult<bool> {
+        self.inner.remove_edge(tenant_id, edge).await
     }
 
     async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {

@@ -16,7 +16,7 @@ pub mod faults;
 pub mod mock;
 
 pub use error::{BackendError, BackendResult, CleanupFailure, CleanupStep, ErrorCode};
-pub use graph::{GraphBackend, GraphEdge};
+pub use graph::{EdgeDirection, GraphBackend, GraphEdge};
 pub use relational::{EngineBackend, Record};
 pub use vector::{VectorBackend, VectorMatch};
 

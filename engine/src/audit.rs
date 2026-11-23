@@ -56,7 +56,7 @@ impl AuditEvent {
         prev_hash: Option<String>,
     ) -> Self {
         let id = Uuid::new_v4();
-        let at = Utc::now();
+        let at = crate::model::now();
         let hash = Self::compute_hash(&prev_hash, tenant_id, operation, memory_id, at);
         Self {
             id,

@@ -157,7 +157,8 @@ fn tokens(text: &str) -> Vec<String> {
 fn bm25_order(query: &str, docs: &[(Uuid, String)]) -> Vec<Uuid> {
     const K1: f64 = 1.2;
     const B: f64 = 0.75;
-    let query: HashSet<String> = tokens(query).into_iter().collect();
+    // Ordered so the float sum below, and so tie-breaks, are the same every call.
+    let query: std::collections::BTreeSet<String> = tokens(query).into_iter().collect();
     if query.is_empty() || docs.is_empty() {
         return Vec::new();
     }

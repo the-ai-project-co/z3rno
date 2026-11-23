@@ -175,6 +175,19 @@ fn search_tenant(vectors: &HashMap<Uuid, Vec<f32>>, query: &[f32], k: usize) -> 
     if vectors.is_empty() || k == 0 {
         return Vec::new();
     }
+    if k >= vectors.len() {
+        // Every vector is returned anyway, so score them exactly: a fresh
+        // HNSW graph this small can drop nodes, and its layers are random.
+        let mut all: Vec<VectorMatch> = vectors
+            .iter()
+            .map(|(id, v)| VectorMatch {
+                id: *id,
+                score: 1.0 / (1.0 + cosine_distance(query, v)),
+            })
+            .collect();
+        all.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
+        return all;
+    }
 
     let ids: Vec<Uuid> = vectors.keys().copied().collect();
     let index: Hnsw<f32, DistCosine> = Hnsw::new(
@@ -197,9 +210,19 @@ fn search_tenant(vectors: &HashMap<Uuid, Vec<f32>>, query: &[f32], k: usize) -> 
             score: 1.0 / (1.0 + neighbour.distance),
         })
         .collect();
-    matches.sort_by(|a, b| b.score.total_cmp(&a.score));
+    matches.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
     matches.truncate(k);
     matches
+}
+
+fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let norm = |v: &[f32]| v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let denom = norm(a) * norm(b);
+    if denom == 0.0 {
+        return 1.0;
+    }
+    (1.0 - dot / denom).max(0.0)
 }
 
 #[async_trait]
@@ -261,6 +284,24 @@ impl VectorBackend for EmbeddedVectorBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_k_covering_every_vector_ranks_exactly_and_stably() {
+        let mut vectors = HashMap::new();
+        for i in 0..8 {
+            vectors.insert(Uuid::new_v4(), vec![1.0, i as f32, 0.0]);
+        }
+        let query = [1.0, 2.0, 0.0];
+        let first = search_tenant(&vectors, &query, 50);
+        assert_eq!(first.len(), 8);
+        assert_eq!(vectors[&first[0].id], vec![1.0, 2.0, 0.0]);
+        assert!(first.windows(2).all(|w| w[0].score >= w[1].score));
+        let again: Vec<Uuid> = search_tenant(&vectors, &query, 50)
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(first.iter().map(|m| m.id).collect::<Vec<_>>(), again);
+    }
 
     #[tokio::test]
     async fn search_returns_nearest_neighbor() {

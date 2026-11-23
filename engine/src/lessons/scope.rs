@@ -24,6 +24,26 @@ pub struct TaskContext {
     pub tool: Option<String>,
 }
 
+pub const MAX_CONTEXT_PATHS: usize = 256;
+pub const MAX_PATH_CHARS: usize = 1_024;
+
+impl TaskContext {
+    /// Bounds what a caller can make recall match against.
+    pub fn validate(&self) -> crate::backend::BackendResult<()> {
+        if self.paths.len() > MAX_CONTEXT_PATHS {
+            return Err(super::model::invalid(format!(
+                "at most {MAX_CONTEXT_PATHS} paths per task context"
+            )));
+        }
+        if self.paths.iter().any(|p| p.len() > MAX_PATH_CHARS) {
+            return Err(super::model::invalid(format!(
+                "task context paths are at most {MAX_PATH_CHARS} bytes"
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Why a lesson matched; drives specificity ranking and the "why shown"
 /// line in rendered output.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -125,30 +145,46 @@ fn normalize_path(path: &str) -> String {
 pub fn glob_match(pattern: &str, path: &str) -> bool {
     let pattern: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
     let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    match_segments(&pattern, &path)
-}
-
-fn match_segments(pattern: &[&str], path: &[&str]) -> bool {
-    match pattern.split_first() {
-        None => path.is_empty(),
-        Some((&"**", rest)) => (0..=path.len()).any(|skip| match_segments(rest, &path[skip..])),
-        Some((first, rest)) => match path.split_first() {
-            Some((segment, path_rest)) => {
-                match_segment(first.as_bytes(), segment.as_bytes())
-                    && match_segments(rest, path_rest)
-            }
-            None => false,
-        },
-    }
+    wildcard(
+        &pattern,
+        &path,
+        |p| *p == "**",
+        |p, seg| match_segment(p.as_bytes(), seg.as_bytes()),
+    )
 }
 
 fn match_segment(pattern: &[u8], text: &[u8]) -> bool {
-    match pattern.split_first() {
-        None => text.is_empty(),
-        Some((b'*', rest)) => (0..=text.len()).any(|skip| match_segment(rest, &text[skip..])),
-        Some((b'?', rest)) => !text.is_empty() && match_segment(rest, &text[1..]),
-        Some((c, rest)) => text.first() == Some(c) && match_segment(rest, &text[1..]),
+    wildcard(pattern, text, |p| *p == b'*', |p, c| *p == b'?' || p == c)
+}
+
+/// Wildcard match in O(pattern * text) time: `star` items match any run
+/// (including none), every other item must match exactly one via `one`.
+/// Iterative so a hostile pattern can't blow up time or stack.
+fn wildcard<P, T>(
+    pattern: &[P],
+    text: &[T],
+    star: impl Fn(&P) -> bool,
+    one: impl Fn(&P, &T) -> bool,
+) -> bool {
+    // row[j]: the pattern so far matches text[..j].
+    let mut row = vec![false; text.len() + 1];
+    row[0] = true;
+    for p in pattern {
+        let mut next = vec![false; text.len() + 1];
+        if star(p) {
+            let mut reachable = false;
+            for j in 0..=text.len() {
+                reachable |= row[j];
+                next[j] = reachable;
+            }
+        } else {
+            for j in 1..=text.len() {
+                next[j] = row[j - 1] && one(p, &text[j - 1]);
+            }
+        }
+        row = next;
     }
+    row[text.len()]
 }
 
 #[cfg(test)]
@@ -181,6 +217,23 @@ mod tests {
         assert!(!glob_match("src/*.rs", "src/a/b.rs"));
         assert!(glob_match("Cargo.???l", "Cargo.toml"));
         assert!(!glob_match("src/auth/**", "src/billing/x.rs"));
+        assert!(glob_match("**", ""));
+        assert!(!glob_match("a?c", "ac"));
+        // Pathological patterns finish quickly instead of backtracking.
+        let long = "a".repeat(400);
+        assert!(!glob_match(&format!("{}b", "*a".repeat(60)), &long));
+        let deep = vec!["x"; 200].join("/");
+        assert!(!glob_match(&format!("{}y", "**/x/".repeat(40)), &deep));
+    }
+
+    #[test]
+    fn oversized_context_is_rejected() {
+        let mut c = ctx("acme/api", &[]);
+        assert!(c.validate().is_ok());
+        c.paths = vec!["a".into(); MAX_CONTEXT_PATHS + 1];
+        assert!(c.validate().is_err());
+        c.paths = vec!["a".repeat(MAX_PATH_CHARS + 1)];
+        assert!(c.validate().is_err());
     }
 
     #[test]

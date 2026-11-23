@@ -18,7 +18,8 @@ pub const REDACTED: &str = "[REDACTED]";
 static WHOLE: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         // PEM private key blocks (any key type), across lines.
-        r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        // A BEGIN with no END (truncated paste) redacts to the end of text.
+        r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*)",
         // AWS access key ids.
         r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b",
         // GitHub tokens (classic and fine-grained).
@@ -155,6 +156,8 @@ mod tests {
         let out = r(&text);
         assert!(!out.contains(&body));
         assert_eq!(out, format!("before\n{REDACTED}\nafter"));
+        let truncated = r(&format!("before\n-----BEGIN PRIVATE KEY-----\n{body}"));
+        assert_eq!(truncated, format!("before\n{REDACTED}"));
     }
 
     #[test]

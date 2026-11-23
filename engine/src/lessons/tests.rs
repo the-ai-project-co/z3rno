@@ -373,3 +373,180 @@ async fn mark_shown_updates_counters_and_render_reports_ids() {
     assert_eq!(after.shown_count, 1);
     assert!(after.last_shown_at.is_some());
 }
+
+#[tokio::test]
+async fn generic_store_cannot_forge_a_lesson() {
+    let e = engine();
+    let forged = serde_json::json!({ "z3rno_kind": "lesson", "lesson": {} });
+    let err = e
+        .store(
+            "t",
+            crate::Tier::Procedural,
+            "x".into(),
+            None,
+            forged,
+            vec![],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some(ErrorCode::InvalidInput));
+    assert!(e.advanced().list_memories("t").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn generic_verbs_leave_lessons_alone() {
+    let e = engine();
+    let l = e.lessons("t");
+    let lesson = l
+        .create(
+            &human(),
+            draft(),
+            LessonStatus::Confirmed,
+            Some(vec![1.0, 0.0]),
+        )
+        .await
+        .unwrap();
+    let err = e.forget("t", lesson.id).await.unwrap_err();
+    assert_eq!(err.code(), Some(ErrorCode::WrongKind));
+    assert!(l.get(lesson.id).await.unwrap().is_some());
+    assert!(e.recall("t", vec![1.0, 0.0], 10).await.unwrap().is_empty());
+    assert!(l.delete(&human(), lesson.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn store_links_must_point_at_live_memories() {
+    let e = engine();
+    let err = e
+        .store(
+            "t",
+            crate::Tier::Semantic,
+            "x".into(),
+            None,
+            serde_json::json!({}),
+            vec![(Uuid::new_v4(), "about".into())],
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, crate::backend::BackendError::NotFound(_)));
+    let target = e
+        .store(
+            "t",
+            crate::Tier::Semantic,
+            "y".into(),
+            None,
+            serde_json::json!({}),
+            vec![],
+        )
+        .await
+        .unwrap();
+    let err = e
+        .store(
+            "t",
+            crate::Tier::Semantic,
+            "x".into(),
+            None,
+            serde_json::json!({}),
+            vec![(target.id, String::new())],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some(ErrorCode::InvalidInput));
+}
+
+#[tokio::test]
+async fn mark_shown_never_rewrites_the_lesson() {
+    let e = engine();
+    let l = e.lessons("t");
+    let c = l
+        .create(&agent(), draft(), LessonStatus::Candidate, None)
+        .await
+        .unwrap();
+    l.transition(&human(), c.id, Transition::Confirm, None)
+        .await
+        .unwrap();
+    l.mark_shown(&[c.id]).await.unwrap();
+    l.mark_shown(&[c.id]).await.unwrap();
+    let after = l.get(c.id).await.unwrap().unwrap();
+    assert_eq!(after.status, LessonStatus::Confirmed);
+    assert_eq!(after.shown_count, 2);
+    assert_eq!(
+        l.list(&LessonFilter::default()).await.unwrap()[0].shown_count,
+        2
+    );
+    // The stored lesson row itself was not touched by mark_shown.
+    let raw = &e.advanced().list_memories("t").await.unwrap()[0];
+    assert_eq!(raw.metadata["lesson"]["shown_count"], 0);
+}
+
+#[tokio::test]
+async fn edit_refuses_to_change_derived_from() {
+    let e = engine();
+    let l = e.lessons("t");
+    let lesson = l
+        .create(&human(), draft(), LessonStatus::Candidate, None)
+        .await
+        .unwrap();
+    let mut d = draft();
+    d.derived_from = vec![Uuid::new_v4()];
+    let err = l
+        .edit(&human(), lesson.id, d, None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some(ErrorCode::InvalidInput));
+}
+
+#[tokio::test]
+async fn recall_rejects_an_oversized_context() {
+    let e = engine();
+    let mut c = ctx("acme/api", &[]);
+    c.paths = vec!["a".into(); scope::MAX_CONTEXT_PATHS + 1];
+    let err = e.lessons("t").recall(&query(c)).await.unwrap_err();
+    assert_eq!(err.code(), Some(ErrorCode::InvalidInput));
+}
+
+#[tokio::test]
+async fn a_legacy_row_with_the_key_is_still_forgettable() {
+    let e = engine();
+    let legacy = crate::Memory {
+        id: Uuid::new_v4(),
+        tenant_id: "t".into(),
+        tier: crate::Tier::Semantic,
+        content: "old".into(),
+        metadata: serde_json::json!({ "z3rno_kind": "lesson" }),
+        created_at: chrono::Utc::now(),
+    };
+    e.store_memory(legacy.clone(), None, vec![]).await.unwrap();
+    assert!(e.forget("t", legacy.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn delete_by_repo_finishes_an_interrupted_lesson_delete_with_bookkeeping() {
+    let e = engine();
+    let l = e.lessons("t");
+    let lesson = l
+        .create(&human(), draft(), LessonStatus::Confirmed, None)
+        .await
+        .unwrap();
+    l.mark_shown(&[lesson.id]).await.unwrap();
+    // Simulate a delete that wrote its tombstone and removed the row, then crashed.
+    e.engine_backend
+        .put(
+            crate::forget::PendingForget::new(lesson.id)
+                .to_record("t")
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    e.engine_backend.delete("t", lesson.id).await.unwrap();
+
+    l.delete_by_repo(&human(), "acme/api").await.unwrap();
+    assert!(e.advanced().pending_forgets("t").await.unwrap().is_empty());
+    let history = l.history(lesson.id).await.unwrap();
+    assert_eq!(history.last().unwrap().action, LessonAction::Deleted);
+    assert!(e
+        .engine_backend
+        .list("t", "lesson_shown")
+        .await
+        .unwrap()
+        .is_empty());
+}

@@ -3,12 +3,16 @@
 //! validated record; its content is the searchable text (what gets
 //! embedded). Status history goes to `lesson_event` records.
 
-use chrono::{Duration, Utc};
+use std::collections::HashMap;
+
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::backend::{BackendError, BackendResult, ErrorCode, Record};
-use crate::engine::{MemoryEngine, KIND_MEMORY};
+use crate::engine::{MemoryEngine, KIND_MEMORY, TYPED_KIND_KEY};
+use crate::forget::derived_record_id;
 use crate::model::{Memory, Tier};
 use crate::ForgetProof;
 
@@ -29,6 +33,28 @@ const STALE_AFTER_DAYS: i64 = 180;
 /// Vector candidates fetched per applicable lesson before post-filtering.
 const VECTOR_OVERFETCH: usize = 4;
 const VECTOR_FETCH_CAP: usize = 1_000;
+
+/// Shown counters live in their own record so `mark_shown` never rewrites
+/// the lesson (which could undo a concurrent human edit or transition).
+const KIND_LESSON_SHOWN: &str = "lesson_shown";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct Shown {
+    lesson_id: Uuid,
+    count: u64,
+    last_at: DateTime<Utc>,
+}
+
+impl Shown {
+    fn record_id(lesson_id: Uuid) -> Uuid {
+        derived_record_id(KIND_LESSON_SHOWN, lesson_id)
+    }
+
+    fn apply(self, lesson: &mut Lesson) {
+        lesson.shown_count = self.count;
+        lesson.last_shown_at = Some(self.last_at);
+    }
+}
 
 /// Graph relationship names lessons use for their links.
 pub const REL_DERIVED_FROM: &str = "derived_from";
@@ -135,10 +161,31 @@ impl<'a> Lessons<'a> {
 
     pub async fn get(&self, id: Uuid) -> BackendResult<Option<Lesson>> {
         let record = self.engine.engine_backend.get(self.tenant_id, id).await?;
-        match record {
+        let mut lesson = match record {
             Some(r) if r.kind == KIND_MEMORY => {
-                lesson_from_memory(&MemoryEngine::record_to_memory(r)?)
+                match lesson_from_memory(&MemoryEngine::record_to_memory(r)?)? {
+                    Some(lesson) => lesson,
+                    None => return Ok(None),
+                }
             }
+            _ => return Ok(None),
+        };
+        if let Some(shown) = self.shown(id).await? {
+            shown.apply(&mut lesson);
+        }
+        Ok(Some(lesson))
+    }
+
+    async fn shown(&self, lesson_id: Uuid) -> BackendResult<Option<Shown>> {
+        match self
+            .engine
+            .engine_backend
+            .get(self.tenant_id, Shown::record_id(lesson_id))
+            .await?
+        {
+            Some(r) if r.kind == KIND_LESSON_SHOWN => Ok(Some(
+                serde_json::from_value(r.data).map_err(anyhow::Error::from)?,
+            )),
             _ => Ok(None),
         }
     }
@@ -177,9 +224,22 @@ impl<'a> Lessons<'a> {
             .engine_backend
             .list(self.tenant_id, KIND_MEMORY)
             .await?;
+        let shown: HashMap<Uuid, Shown> = self
+            .engine
+            .engine_backend
+            .list(self.tenant_id, KIND_LESSON_SHOWN)
+            .await?
+            .into_iter()
+            .map(|r| serde_json::from_value::<Shown>(r.data).map(|s| (s.lesson_id, s)))
+            .collect::<Result<_, _>>()
+            .map_err(anyhow::Error::from)?;
         let mut lessons = Vec::new();
         for record in records {
-            if let Some(lesson) = lesson_from_memory(&MemoryEngine::record_to_memory(record)?)? {
+            if let Some(mut lesson) = lesson_from_memory(&MemoryEngine::record_to_memory(record)?)?
+            {
+                if let Some(s) = shown.get(&lesson.id) {
+                    s.apply(&mut lesson);
+                }
                 lessons.push(lesson);
             }
         }
@@ -201,6 +261,9 @@ impl<'a> Lessons<'a> {
         require_human(actor, "edit")?;
         let mut lesson = self.require(id).await?;
         let mut draft = self.prepare(draft)?;
+        if !draft.derived_from.is_empty() && draft.derived_from != lesson.draft.derived_from {
+            return Err(invalid("derived_from can't change after creation"));
+        }
         draft.derived_from = std::mem::take(&mut lesson.draft.derived_from);
         lesson.draft = draft;
         self.save(&lesson).await?;
@@ -311,7 +374,9 @@ impl<'a> Lessons<'a> {
     }
 
     /// Deletes a lesson from every store through the engine's resumable
-    /// `forget` (human only). The history keeps who deleted which id, never
+    /// forget protocol (human only). A pending forget finished elsewhere
+    /// (generic `forget`, `complete_pending_forgets`) skips this bookkeeping.
+    /// The history keeps who deleted which id, never
     /// the content. `Ok(None)` if there was no such lesson.
     pub async fn delete(&self, actor: &Actor, id: Uuid) -> BackendResult<Option<ForgetProof>> {
         require_human(actor, "delete")?;
@@ -329,8 +394,12 @@ impl<'a> Lessons<'a> {
                 return Ok(None);
             }
         }
-        let proof = self.engine.forget(self.tenant_id, id).await?;
+        let proof = self.engine.forget_any(self.tenant_id, id).await?;
         if proof.is_some() {
+            self.engine
+                .engine_backend
+                .delete(self.tenant_id, Shown::record_id(id))
+                .await?;
             self.record_event(id, LessonAction::Deleted, actor, None)
                 .await?;
         }
@@ -341,6 +410,17 @@ impl<'a> Lessons<'a> {
     /// Stops at the first failure (a later call resumes it).
     pub async fn delete_by_repo(&self, actor: &Actor, repo: &str) -> BackendResult<Vec<Uuid>> {
         require_human(actor, "delete")?;
+        // An earlier interrupted delete already hid its lesson from `list`,
+        // so finish those first (through `delete`, for the bookkeeping). Their
+        // repo is no longer known, so they aren't in the returned ids.
+        for pending in self
+            .engine
+            .advanced()
+            .pending_forgets(self.tenant_id)
+            .await?
+        {
+            self.delete(actor, pending.memory_id).await?;
+        }
         let filter = LessonFilter {
             status: None,
             repo: Some(repo.to_string()),
@@ -359,6 +439,7 @@ impl<'a> Lessons<'a> {
     /// With no repo in the context, nothing is returned unless the caller
     /// sets `include_global` (and then only global lessons match).
     pub async fn recall(&self, query: &LessonQuery) -> BackendResult<Vec<RecalledLesson>> {
+        query.context.validate()?;
         if query.context.repo.is_none() && !query.include_global {
             return Ok(Vec::new());
         }
@@ -411,14 +492,31 @@ impl<'a> Lessons<'a> {
 
     /// Records that these lessons were shown to an agent (bumps
     /// `shown_count`, sets `last_shown_at`). Unknown ids are skipped.
+    ///
+    /// shortcut: read-modify-write, so two concurrent calls can lose an
+    /// increment; the counter is advisory. Use an atomic backend op if it
+    /// ever drives decisions.
     pub async fn mark_shown(&self, ids: &[Uuid]) -> BackendResult<()> {
         let now = Utc::now();
-        for id in ids {
-            if let Some(mut lesson) = self.get(*id).await? {
-                lesson.shown_count += 1;
-                lesson.last_shown_at = Some(now);
-                self.save(&lesson).await?;
-            }
+        for &id in ids {
+            let Some(lesson) = self.get(id).await? else {
+                continue;
+            };
+            let shown = Shown {
+                lesson_id: id,
+                count: lesson.shown_count + 1,
+                last_at: now,
+            };
+            self.engine
+                .engine_backend
+                .put(Record {
+                    id: Shown::record_id(id),
+                    tenant_id: self.tenant_id.to_string(),
+                    kind: KIND_LESSON_SHOWN.to_string(),
+                    data: serde_json::to_value(shown).map_err(anyhow::Error::from)?,
+                    created_at: now,
+                })
+                .await?;
         }
         Ok(())
     }
@@ -503,7 +601,7 @@ fn warnings_for(lesson: &Lesson, query: &LessonQuery, now: chrono::DateTime<Utc>
 }
 
 fn to_memory(tenant_id: &str, lesson: &Lesson) -> BackendResult<Memory> {
-    let metadata = json!({ "z3rno_kind": METADATA_KIND, "lesson": lesson });
+    let metadata = json!({ TYPED_KIND_KEY: METADATA_KIND, "lesson": lesson });
     let size = serde_json::to_vec(&metadata)
         .map_err(anyhow::Error::from)?
         .len();
@@ -524,7 +622,11 @@ fn to_memory(tenant_id: &str, lesson: &Lesson) -> BackendResult<Memory> {
 
 /// `Some` if `memory` carries a lesson record.
 pub fn lesson_from_memory(memory: &Memory) -> BackendResult<Option<Lesson>> {
-    if memory.metadata.get("z3rno_kind").and_then(|v| v.as_str()) != Some(METADATA_KIND) {
+    // Only `to_memory` writes this shape: generic `store` refuses the key.
+    // Tier and id are checked too, as a second line against a forged row.
+    if memory.metadata.get(TYPED_KIND_KEY).and_then(|v| v.as_str()) != Some(METADATA_KIND)
+        || memory.tier != Tier::Procedural
+    {
         return Ok(None);
     }
     let value = memory
@@ -532,7 +634,9 @@ pub fn lesson_from_memory(memory: &Memory) -> BackendResult<Option<Lesson>> {
         .get("lesson")
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("lesson memory {} has no lesson payload", memory.id))?;
-    Ok(Some(
-        serde_json::from_value(value).map_err(anyhow::Error::from)?,
-    ))
+    let lesson: Lesson = serde_json::from_value(value).map_err(anyhow::Error::from)?;
+    if lesson.id != memory.id {
+        return Ok(None);
+    }
+    Ok(Some(lesson))
 }

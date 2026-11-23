@@ -3915,6 +3915,7 @@ name = "z3rno-evals"
 version = "0.23.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "serde",
  "serde_json",
  "tempfile",

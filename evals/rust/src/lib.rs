@@ -5,6 +5,7 @@
 //! isolation from the engine.
 
 pub mod dataset;
+pub mod lessons;
 pub mod metrics;
 
 pub use dataset::{Dataset, Item, Seed};

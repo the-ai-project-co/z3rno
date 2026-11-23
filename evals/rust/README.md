@@ -57,3 +57,35 @@ embedding (`z3rno-hash-embed`) — not copied from anywhere else, since this
 retrieval mechanism (crude feature hashing, not a semantic model) has no
 comparable baseline elsewhere in the repo. See the comment next to the
 threshold constants for the measured numbers and the headroom built in.
+
+## Lessons recall eval
+
+`tests/lessons_run.rs` seeds `evals/fixtures/lessons_v1.json` (invented
+repos and lessons) through the lessons API and checks, for each task
+context in the fixture:
+
+- **recall@2** of the lessons the task should get back;
+- **wrong-scope rate**: the share of returned lessons whose scope rules
+  them out for the task (other repo, other path, a dependency version
+  outside the lesson's range, a global lesson that wasn't asked for, an
+  unconfirmed candidate);
+- **stale rate**: the share of returned lessons that were retired;
+- **injected size**: characters of the rendered block per task, a proxy
+  for context cost (no tokenizer is used);
+- **injection containment**: a lesson whose text tries to close the data
+  block and issue instructions still renders as one well-formed block, with
+  those lines marked `[quoted]`.
+
+Wrong-scope and stale results must be zero, since those filters are exact.
+The recall threshold leaves headroom for fixture edits. These numbers
+describe a small synthetic fixture. They are a regression check, not
+evidence that lessons improve an agent's results.
+
+```
+cargo test -p z3rno-evals --test lessons_run -- --nocapture
+```
+
+Measured on 2026-11-23 (8 tasks, 10 lessons): mean recall@2 1.0, wrong-scope
+0/8 results, stale 0/8, injected size mean 459 and max 959 characters
+against the 6000 cap. Each task has at most two applicable lessons, so
+recall@2 mostly reflects scope filtering, not ranking quality.

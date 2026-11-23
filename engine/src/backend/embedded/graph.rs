@@ -191,17 +191,24 @@ impl GraphBackend for EmbeddedGraphBackend {
                 params![tenant_id, edge.target.to_string()],
             )
             .map_err(anyhow::Error::from)?;
-            c.execute(
-                "INSERT INTO graph_edges (tenant_id, source, target, relationship)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    tenant_id,
-                    edge.source.to_string(),
-                    edge.target.to_string(),
-                    edge.relationship,
-                ],
-            )
-            .map_err(anyhow::Error::from)?;
+            // Idempotent: the same edge twice is stored once.
+            let inserted = c
+                .execute(
+                    "INSERT INTO graph_edges (tenant_id, source, target, relationship)
+                     SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (
+                         SELECT 1 FROM graph_edges WHERE tenant_id = ?1
+                         AND source = ?2 AND target = ?3 AND relationship = ?4)",
+                    params![
+                        tenant_id,
+                        edge.source.to_string(),
+                        edge.target.to_string(),
+                        edge.relationship,
+                    ],
+                )
+                .map_err(anyhow::Error::from)?;
+            if inserted == 0 {
+                return Ok(());
+            }
         }
         let mut tenants = self.tenants.write().unwrap();
         let tenant = tenants.entry(tenant_id.to_string()).or_default();

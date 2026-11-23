@@ -13,12 +13,29 @@ use uuid::Uuid;
 use crate::audit::{AuditEvent, AuditOperation, ForgetProof};
 use crate::backend::{
     BackendError, BackendResult, CleanupFailure, CleanupStep, EmbeddedGraphBackend,
-    EmbeddedVectorBackend, EngineBackend, GraphBackend, Record, SqliteEngineBackend, VectorBackend,
+    EmbeddedVectorBackend, EngineBackend, ErrorCode, GraphBackend, Record, SqliteEngineBackend,
+    VectorBackend,
 };
 use crate::forget::{PendingForget, KIND_FORGET_PENDING};
 use crate::model::{Memory, Tier};
 
 pub(crate) const KIND_MEMORY: &str = "memory";
+/// Metadata key marking a memory as a typed record (e.g. a lesson) owned by
+/// an engine module. The generic verbs refuse to create, recall or forget
+/// these, so typed records can only change through their own API.
+pub(crate) const TYPED_KIND_KEY: &str = "z3rno_kind";
+const MAX_LINKS: usize = 100;
+
+/// True only for rows a typed-record module actually owns (today: a lesson
+/// that parses). A legacy row that merely carries the key stays an ordinary
+/// memory, so generic `forget` can still erase it.
+fn is_typed(record: &Record) -> bool {
+    record.kind == KIND_MEMORY
+        && MemoryEngine::record_to_memory(record.clone())
+            .ok()
+            .and_then(|m| crate::lessons::lesson_from_memory(&m).ok().flatten())
+            .is_some()
+}
 const KIND_AUDIT_EVENT: &str = "audit_event";
 
 /// Which tenant-isolation guarantee a `MemoryEngine`'s backends provide —
@@ -155,6 +172,13 @@ impl MemoryEngine {
         metadata: serde_json::Value,
         links: Vec<(Uuid, String)>,
     ) -> BackendResult<Memory> {
+        if metadata.get(TYPED_KIND_KEY).is_some() {
+            return Err(BackendError::rejected(
+                ErrorCode::InvalidInput,
+                format!("metadata key {TYPED_KIND_KEY:?} is reserved"),
+            ));
+        }
+        self.check_links(tenant_id, &links).await?;
         let memory = Memory {
             id: Uuid::new_v4(),
             tenant_id: tenant_id.to_string(),
@@ -204,6 +228,28 @@ impl MemoryEngine {
         Ok(memory)
     }
 
+    /// Links passed to `store` follow the same rules as `Advanced::link`:
+    /// bounded count, valid relationship names, live targets.
+    async fn check_links(&self, tenant_id: &str, links: &[(Uuid, String)]) -> BackendResult<()> {
+        if links.len() > MAX_LINKS {
+            return Err(BackendError::rejected(
+                ErrorCode::InvalidInput,
+                format!("at most {MAX_LINKS} links per memory"),
+            ));
+        }
+        for (_, relationship) in links {
+            crate::traverse::check_relationship(relationship)?;
+        }
+        let targets: Vec<Uuid> = links.iter().map(|(id, _)| *id).collect();
+        let live = self.live_memory_ids(tenant_id, targets.clone()).await?;
+        if let Some(missing) = targets.iter().find(|id| !live.contains(id)) {
+            return Err(BackendError::NotFound(format!(
+                "link target {missing} is not a stored memory"
+            )));
+        }
+        Ok(())
+    }
+
     /// Writes (or overwrites in place) a memory's relational row.
     pub(crate) async fn put_memory(&self, memory: &Memory) -> BackendResult<()> {
         self.engine_backend
@@ -236,9 +282,13 @@ impl MemoryEngine {
             .map(|record| (record.id, record))
             .collect::<HashMap<_, _>>();
         let mut memories = Vec::with_capacity(matches.len());
+        // shortcut: typed records are dropped after the search, so a store
+        // full of lessons can return fewer than `k`; over-fetch if it matters.
         for m in matches {
             if let Some(record) = by_id.remove(&m.id) {
-                memories.push(Self::record_to_memory(record)?);
+                if !is_typed(&record) {
+                    memories.push(Self::record_to_memory(record)?);
+                }
             }
         }
         Ok(memories)
@@ -255,7 +305,27 @@ impl MemoryEngine {
     /// - `Err(BackendError::ForgetIncomplete { .. })`: the memory is hidden
     ///   from every read path, but a derived store still holds an entry.
     ///   No audit event yet; call `forget` again to retry.
+    /// - `Err(Rejected { code: WrongKind, .. })`: the id is a typed record
+    ///   (a lesson); delete it through its own API.
     pub async fn forget(&self, tenant_id: &str, id: Uuid) -> BackendResult<Option<ForgetProof>> {
+        if let Some(record) = self.engine_backend.get(tenant_id, id).await? {
+            if is_typed(&record) {
+                return Err(BackendError::rejected(
+                    ErrorCode::WrongKind,
+                    format!("{id} is a typed record; delete it through its own API"),
+                ));
+            }
+        }
+        self.forget_any(tenant_id, id).await
+    }
+
+    /// `forget` without the typed-record guard, for the modules that own
+    /// typed records.
+    pub(crate) async fn forget_any(
+        &self,
+        tenant_id: &str,
+        id: Uuid,
+    ) -> BackendResult<Option<ForgetProof>> {
         let pending = match self.engine_backend.get(tenant_id, id).await? {
             Some(record) if record.kind == KIND_MEMORY => {
                 let pending = PendingForget::new(id);
@@ -301,6 +371,9 @@ impl MemoryEngine {
         pending: &PendingForget,
     ) -> BackendResult<ForgetProof> {
         let id = pending.memory_id;
+        // A crash between writing the tombstone and deleting the row leaves
+        // the row behind; deleting again here is a no-op otherwise.
+        self.engine_backend.delete(tenant_id, id).await?;
         let mut failures = Vec::new();
         if let Err(err) = self.vector_backend.delete(tenant_id, id).await {
             failures.push(CleanupFailure {

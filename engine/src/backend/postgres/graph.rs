@@ -295,8 +295,9 @@ impl GraphBackend for PostgresGraphBackend {
                 .await
                 .map_err(anyhow::Error::from)?;
             for row in rows {
-                let name: String = serde_json::from_str(row.get::<String, _>(1).as_str())
-                    .map_err(|e| anyhow::anyhow!("unexpected agtype relationship value: {e}"))?;
+                // AGE's agtype-to-text cast returns a string scalar unquoted
+                // (checked against AGE in the dev image), so take it as is.
+                let name: String = row.get(1);
                 edges.push(GraphEdge {
                     source: parse_agtype_uuid(row.get::<String, _>(0).as_str())?,
                     target: parse_agtype_uuid(row.get::<String, _>(2).as_str())?,

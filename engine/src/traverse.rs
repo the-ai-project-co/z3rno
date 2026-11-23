@@ -48,6 +48,15 @@ fn rejected(message: impl Into<String>) -> BackendError {
     BackendError::rejected(ErrorCode::InvalidInput, message)
 }
 
+pub(crate) fn check_relationship(relationship: &str) -> BackendResult<()> {
+    if relationship.is_empty() || relationship.chars().count() > MAX_RELATIONSHIP {
+        return Err(rejected(format!(
+            "relationship must be 1..={MAX_RELATIONSHIP} characters"
+        )));
+    }
+    Ok(())
+}
+
 impl Advanced<'_> {
     /// Adds `source -[relationship]-> target` between two stored memories.
     /// Idempotent: linking the same pair twice keeps one edge.
@@ -59,11 +68,7 @@ impl Advanced<'_> {
         relationship: &str,
     ) -> BackendResult<()> {
         let relationship = relationship.trim();
-        if relationship.is_empty() || relationship.chars().count() > MAX_RELATIONSHIP {
-            return Err(rejected(format!(
-                "relationship must be 1..={MAX_RELATIONSHIP} characters"
-            )));
-        }
+        check_relationship(relationship)?;
         if source == target {
             return Err(rejected("a memory can't link to itself"));
         }

@@ -46,13 +46,7 @@ impl PendingForget {
     /// resume is a single keyed `get`, not a scan. Domain-separated so it
     /// can never equal a memory id.
     pub(crate) fn record_id(memory_id: Uuid) -> Uuid {
-        let digest = Sha256::new()
-            .chain_update(b"z3rno:forget_pending:")
-            .chain_update(memory_id.as_bytes())
-            .finalize();
-        let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(&digest[..16]);
-        uuid::Builder::from_random_bytes(bytes).into_uuid()
+        derived_record_id("forget_pending", memory_id)
     }
 
     pub(crate) fn to_record(&self, tenant_id: &str) -> anyhow::Result<Record> {
@@ -68,6 +62,20 @@ impl PendingForget {
     pub(crate) fn from_record(record: Record) -> anyhow::Result<Self> {
         Ok(serde_json::from_value(record.data)?)
     }
+}
+
+/// A deterministic record id for a side record (`label`) of `id`, so the
+/// side record can be found again without an index.
+pub(crate) fn derived_record_id(label: &str, id: Uuid) -> Uuid {
+    let digest = Sha256::new()
+        .chain_update(b"z3rno:")
+        .chain_update(label.as_bytes())
+        .chain_update(b":")
+        .chain_update(id.as_bytes())
+        .finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    uuid::Builder::from_random_bytes(bytes).into_uuid()
 }
 
 #[cfg(test)]
@@ -367,5 +375,46 @@ mod protocol_tests {
             1
         );
         assert!(h.engine.forget("tenant-a", m.id).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn recovery_deletes_a_row_left_by_a_crash_after_the_tombstone() {
+        let h = embedded();
+        let m = h
+            .engine
+            .store(
+                "tenant-a",
+                Tier::Working,
+                "x".into(),
+                None,
+                json!({}),
+                vec![],
+            )
+            .await
+            .unwrap();
+        // Simulate a crash between writing the tombstone and deleting the row.
+        h.engine
+            .engine_backend
+            .put(
+                super::PendingForget::new(m.id)
+                    .to_record("tenant-a")
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let results = h
+            .engine
+            .advanced()
+            .complete_pending_forgets("tenant-a")
+            .await
+            .unwrap();
+        assert!(results[0].1.is_ok());
+        assert!(h
+            .engine
+            .engine_backend
+            .get("tenant-a", m.id)
+            .await
+            .unwrap()
+            .is_none());
     }
 }

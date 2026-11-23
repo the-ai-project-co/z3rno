@@ -274,19 +274,46 @@ pub async fn run(args: LessonArgs) -> anyhow::Result<()> {
             std::fs::create_dir_all(&out)?;
             let found = lessons.list(&LessonFilter { status, repo }).await?;
             for lesson in &found {
+                // Redact again on the way out: patterns may have been added
+                // since the lesson was stored.
+                let mut doc = LessonDoc::from_lesson(lesson);
+                doc.draft = lessons.prepare(doc.draft)?;
                 let path = out.join(format!("{}.md", lesson.id));
-                std::fs::write(&path, LessonDoc::from_lesson(lesson).to_markdown()?)?;
+                std::fs::write(&path, doc.to_markdown()?)?;
             }
             println!("Exported {} lesson(s) to {}.", found.len(), out.display());
         }
         LessonCommand::Import { files, confirm } => {
-            // Parse everything first so a bad file imports nothing.
-            let docs = files
-                .iter()
-                .map(|f| LessonDoc::parse(&read_input(f)?).with_context(|| f.display().to_string()))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            for (file, doc) in files.iter().zip(docs) {
-                let lesson = create(&lessons, &gate, doc.draft, confirm).await?;
+            // Parse, validate and check the human gate first, so a bad file
+            // or a missing confirmation imports nothing.
+            if confirm {
+                gate.require("confirm")?;
+            }
+            let mut plan = Vec::new();
+            for file in &files {
+                let doc = LessonDoc::parse(&read_input(file)?)
+                    .with_context(|| file.display().to_string())?;
+                if matches!(
+                    doc.status,
+                    Some(LessonStatus::Retired | LessonStatus::Rejected)
+                ) {
+                    eprintln!("skipping {}: status is not live", file.display());
+                    continue;
+                }
+                let mut draft = lessons
+                    .prepare(doc.draft)
+                    .with_context(|| file.display().to_string())?;
+                if !draft.derived_from.is_empty() {
+                    // Those ids belong to the store the file came from.
+                    eprintln!("{}: dropping derived_from links", file.display());
+                    draft.derived_from.clear();
+                }
+                // `--confirm` never promotes a file that was exported as a candidate.
+                let confirm = confirm && doc.status != Some(LessonStatus::Candidate);
+                plan.push((file, draft, confirm));
+            }
+            for (file, draft, confirm) in plan {
+                let lesson = create(&lessons, &gate, draft, confirm).await?;
                 println!(
                     "{}  {}  {}",
                     lesson.id,

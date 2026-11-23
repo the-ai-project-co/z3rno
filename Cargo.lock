@@ -3836,6 +3836,7 @@ dependencies = [
  "hnsw_rs",
  "petgraph",
  "pgvector",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

@@ -4,6 +4,7 @@ pub mod audit;
 pub mod backend;
 pub mod engine;
 pub mod forget;
+pub mod lessons;
 pub mod model;
 
 pub use audit::{AuditEvent, AuditOperation, ForgetProof};

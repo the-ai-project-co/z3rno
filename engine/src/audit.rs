@@ -11,8 +11,8 @@
 //! + pgvector + Apache AGE), not the embedded default.
 //!
 //! What z3rno's already-shipped product copy actually promises is narrower
-//! and is what this module provides: "`forget` returns a proof of erasure,
-//! and `audit` queries an append-only, hash-chained history of *what
+//! and is what this module provides: "`forget` returns an audit reference
+//! for the deletion (see `crate::forget`), and `audit` queries an append-only, hash-chained history of *what
 //! changed and when*" — a durable log of operations, not a preserved copy
 //! of every past value. That's exactly what an `AuditEvent` chain gives:
 //! every `store`/`forget` appends one event, each hashing in the previous

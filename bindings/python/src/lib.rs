@@ -11,12 +11,15 @@
 
 use std::sync::{Arc, OnceLock};
 
-use pyo3::exceptions::{PyLookupError, PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyLookupError, PyPermissionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pythonize::{depythonize, pythonize};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-use z3rno_engine::backend::BackendError;
+use z3rno_engine::backend::{BackendError, ErrorCode};
+use z3rno_engine::lessons::{
+    render_for_agent, Actor, LessonDraft, LessonFilter, LessonQuery, LessonStatus, Transition,
+};
 use z3rno_engine::{BackendTier, MemoryEngine, Tier};
 
 /// The shared Tokio runtime every engine call is driven through. Built
@@ -69,6 +72,12 @@ fn backend_error_to_pyerr(err: BackendError) -> PyErr {
     match err {
         BackendError::NotFound(msg) => PyLookupError::new_err(msg),
         BackendError::Storage(err) => PyRuntimeError::new_err(err.to_string()),
+        err @ BackendError::ForgetIncomplete { .. } => PyRuntimeError::new_err(err.to_string()),
+        err @ BackendError::Rejected {
+            code: ErrorCode::NotPermitted,
+            ..
+        } => PyPermissionError::new_err(err.to_string()),
+        err @ BackendError::Rejected { .. } => PyValueError::new_err(err.to_string()),
     }
 }
 
@@ -144,6 +153,14 @@ impl Client {
         }
     }
 
+    /// `client.lessons` — see [`Lessons`].
+    #[getter]
+    fn lessons(&self) -> Lessons {
+        Lessons {
+            engine: Arc::clone(&self.engine),
+        }
+    }
+
     /// Stores a memory, returning it as a dict with
     /// id/tenant_id/tier/content/metadata/created_at.
     #[pyo3(signature = (tenant_id, tier, content, embedding=None, metadata=None, links=vec![]))]
@@ -195,7 +212,7 @@ impl Client {
     }
 
     /// Forgets a memory, returning `None` if it was already gone, else a
-    /// dict with audit_event_id/hash as proof of erasure.
+    /// dict with audit_event_id/hash as an audit reference for the deletion.
     fn forget(&self, py: Python<'_>, tenant_id: &str, id: &str) -> PyResult<Py<PyAny>> {
         let id = Uuid::parse_str(id)
             .map_err(|e| PyValueError::new_err(format!("invalid id {id:?}: {e}")))?;
@@ -212,10 +229,231 @@ impl Client {
     }
 }
 
+fn parse_id(id: &str) -> PyResult<Uuid> {
+    Uuid::parse_str(id).map_err(|e| PyValueError::new_err(format!("invalid id {id:?}: {e}")))
+}
+
+/// `client.lessons` — scoped, human-gated lessons. Every write takes an
+/// `actor` dict (`{"kind": "human"|"agent"|"ci", "name": ..., "session":
+/// ...}`); the engine trusts it, so an interface an agent drives must only
+/// ever pass `kind="agent"` (agents can only create candidates).
+/// Drafts, queries and results are plain dicts matching the engine's
+/// serde shapes.
+#[pyclass]
+struct Lessons {
+    engine: Arc<MemoryEngine>,
+}
+
+/// Drives one engine future to completion with the GIL released.
+fn block<T: Send>(
+    py: Python<'_>,
+    fut: impl std::future::Future<Output = Result<T, BackendError>> + Send,
+) -> PyResult<T> {
+    py.detach(|| runtime().block_on(fut))
+        .map_err(backend_error_to_pyerr)
+}
+
+#[pymethods]
+impl Lessons {
+    /// Redacts and validates `draft` without storing it; returns what
+    /// `create` would store.
+    fn prepare(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        draft: Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let draft: LessonDraft = depythonize(&draft)?;
+        let prepared = self
+            .engine
+            .lessons(tenant_id)
+            .prepare(draft)
+            .map_err(backend_error_to_pyerr)?;
+        Ok(pythonize(py, &prepared)?.unbind())
+    }
+
+    /// The text the engine embeds for `draft`, so callers embed lessons
+    /// in the same space as the engine without re-implementing it.
+    #[staticmethod]
+    fn searchable_text(draft: Bound<'_, PyAny>) -> PyResult<String> {
+        let draft: LessonDraft = depythonize(&draft)?;
+        Ok(draft.searchable_text())
+    }
+
+    /// Stores a new lesson (`status` "candidate" or, for a human,
+    /// "confirmed") and returns it.
+    #[pyo3(signature = (tenant_id, actor, draft, status="candidate", embedding=None))]
+    fn create(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        actor: Bound<'_, PyAny>,
+        draft: Bound<'_, PyAny>,
+        status: &str,
+        embedding: Option<Vec<f32>>,
+    ) -> PyResult<Py<PyAny>> {
+        let actor: Actor = depythonize(&actor)?;
+        let draft: LessonDraft = depythonize(&draft)?;
+        let status: LessonStatus = status.parse().map_err(backend_error_to_pyerr)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let lesson = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id)
+                .create(&actor, draft, status, embedding)
+                .await
+        })?;
+        Ok(pythonize(py, &lesson)?.unbind())
+    }
+
+    /// The lesson with `id`, or `None`.
+    fn get(&self, py: Python<'_>, tenant_id: &str, id: &str) -> PyResult<Py<PyAny>> {
+        let id = parse_id(id)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let lesson = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id).get(id).await
+        })?;
+        Ok(pythonize(py, &lesson)?.unbind())
+    }
+
+    /// Lessons, optionally filtered by status and repo.
+    #[pyo3(signature = (tenant_id, status=None, repo=None))]
+    fn list(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        status: Option<&str>,
+        repo: Option<String>,
+    ) -> PyResult<Py<PyAny>> {
+        let status = status
+            .map(str::parse::<LessonStatus>)
+            .transpose()
+            .map_err(backend_error_to_pyerr)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let lessons = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id)
+                .list(&LessonFilter { status, repo })
+                .await
+        })?;
+        Ok(pythonize(py, &lessons)?.unbind())
+    }
+
+    /// Applies "confirm", "reject", "retire" or "reinstate" (human only).
+    #[pyo3(signature = (tenant_id, actor, id, transition, note=None))]
+    fn transition(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        actor: Bound<'_, PyAny>,
+        id: &str,
+        transition: &str,
+        note: Option<String>,
+    ) -> PyResult<Py<PyAny>> {
+        let actor: Actor = depythonize(&actor)?;
+        let transition: Transition = serde_json::from_value(serde_json::Value::from(transition))
+            .map_err(|_| {
+                PyValueError::new_err(format!(
+                    "invalid transition {transition:?}: expected confirm, reject, retire or reinstate"
+                ))
+            })?;
+        let id = parse_id(id)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let lesson = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id)
+                .transition(&actor, id, transition, note)
+                .await
+        })?;
+        Ok(pythonize(py, &lesson)?.unbind())
+    }
+
+    /// Deletes a lesson (human only); `None` if there was no such lesson.
+    fn delete(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        actor: Bound<'_, PyAny>,
+        id: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let actor: Actor = depythonize(&actor)?;
+        let id = parse_id(id)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let proof = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id).delete(&actor, id).await
+        })?;
+        Ok(pythonize(py, &proof)?.unbind())
+    }
+
+    /// The lesson's review history, oldest first.
+    fn history(&self, py: Python<'_>, tenant_id: &str, id: &str) -> PyResult<Py<PyAny>> {
+        let id = parse_id(id)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let events = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id).history(id).await
+        })?;
+        Ok(pythonize(py, &events)?.unbind())
+    }
+
+    /// Ranked lessons for a query dict (`{"context": {"repo": ...,
+    /// "paths": [...]}, "text": ..., "embedding": [...], ...}`), as
+    /// `{lesson, score, warnings}` dicts.
+    fn recall(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        query: Bound<'_, PyAny>,
+    ) -> PyResult<Py<PyAny>> {
+        let query: LessonQuery = depythonize(&query)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let recalled = block(py, async move {
+            let e = &engine;
+            e.lessons(&tenant_id).recall(&query).await
+        })?;
+        Ok(pythonize(py, &recalled)?.unbind())
+    }
+
+    /// Recalls, renders the results as one delimited data block of at
+    /// most `max_chars`, and records the included lessons as shown.
+    /// Returns `{text, included, omitted}`; `text` is empty when nothing
+    /// applies.
+    #[pyo3(signature = (tenant_id, query, max_chars=z3rno_engine::lessons::DEFAULT_MAX_CHARS))]
+    fn recall_rendered(
+        &self,
+        py: Python<'_>,
+        tenant_id: &str,
+        query: Bound<'_, PyAny>,
+        max_chars: usize,
+    ) -> PyResult<Py<PyAny>> {
+        let query: LessonQuery = depythonize(&query)?;
+        let tenant_id = tenant_id.to_string();
+        let engine = Arc::clone(&self.engine);
+        let rendered = block(py, async move {
+            let e = &engine;
+            let lessons = e.lessons(&tenant_id);
+            let recalled = lessons.recall(&query).await?;
+            let rendered = render_for_agent(&recalled, max_chars, chrono::Utc::now());
+            lessons.mark_shown(&rendered.included).await?;
+            Ok(rendered)
+        })?;
+        Ok(pythonize(py, &rendered)?.unbind())
+    }
+}
+
 #[pymodule]
 fn z3rno(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Client>()?;
     m.add_class::<Advanced>()?;
+    m.add_class::<Lessons>()?;
     Ok(())
 }
 

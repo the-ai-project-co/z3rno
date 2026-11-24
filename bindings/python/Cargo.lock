@@ -2640,6 +2640,7 @@ dependencies = [
 name = "z3rno"
 version = "0.23.0"
 dependencies = [
+ "chrono",
  "pyo3",
  "pythonize",
  "serde_json",
@@ -2658,6 +2659,7 @@ dependencies = [
  "hnsw_rs",
  "petgraph",
  "pgvector",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

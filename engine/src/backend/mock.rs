@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::audit::{AuditEvent, AuditOperation};
 
 use super::error::BackendResult;
-use super::graph::{GraphBackend, GraphEdge};
+use super::graph::{EdgeDirection, GraphBackend, GraphEdge};
 use super::relational::{EngineBackend, Record};
 use super::vector::{VectorBackend, VectorMatch};
 
@@ -176,21 +176,36 @@ impl GraphBackend for MockGraphBackend {
         Ok(())
     }
 
-    async fn neighbors(
+    async fn edges(
         &self,
         tenant_id: &str,
         id: Uuid,
         relationship: Option<&str>,
-    ) -> BackendResult<Vec<Uuid>> {
+        direction: EdgeDirection,
+    ) -> BackendResult<Vec<GraphEdge>> {
         let edges = self.edges.lock().unwrap();
         let Some(tenant_edges) = edges.get(tenant_id) else {
             return Ok(Vec::new());
         };
         Ok(tenant_edges
             .iter()
-            .filter(|e| e.source == id && relationship.is_none_or(|r| r == e.relationship))
-            .map(|e| e.target)
+            .filter(|e| {
+                ((direction.includes_outgoing() && e.source == id)
+                    || (direction.includes_incoming() && e.target == id))
+                    && relationship.is_none_or(|r| r == e.relationship)
+            })
+            .cloned()
             .collect())
+    }
+
+    async fn remove_edge(&self, tenant_id: &str, edge: &GraphEdge) -> BackendResult<bool> {
+        let mut edges = self.edges.lock().unwrap();
+        let Some(tenant_edges) = edges.get_mut(tenant_id) else {
+            return Ok(false);
+        };
+        let before = tenant_edges.len();
+        tenant_edges.retain(|e| e != edge);
+        Ok(tenant_edges.len() != before)
     }
 
     async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {

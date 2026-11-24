@@ -3,11 +3,16 @@
 pub mod audit;
 pub mod backend;
 pub mod engine;
+pub mod forget;
+pub mod lessons;
 pub mod model;
+pub mod traverse;
 
 pub use audit::{AuditEvent, AuditOperation, ForgetProof};
 pub use engine::{Advanced, BackendTier, MemoryEngine};
+pub use forget::PendingForget;
 pub use model::{Memory, Tier};
+pub use traverse::{TraversalStep, TraverseQuery};
 
 /// Returns the crate's version, as set in `Cargo.toml`.
 pub fn version() -> &'static str {

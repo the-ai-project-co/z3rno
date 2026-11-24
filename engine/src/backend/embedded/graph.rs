@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use super::conn;
 use crate::backend::error::BackendResult;
-use crate::backend::graph::{GraphBackend, GraphEdge};
+use crate::backend::graph::{EdgeDirection, GraphBackend, GraphEdge};
 
 /// One tenant's graph: node weights are the memory node `Uuid`s, edge
 /// weights are relationship names. `StableDiGraph` (not `Graph`) is load
@@ -191,17 +191,24 @@ impl GraphBackend for EmbeddedGraphBackend {
                 params![tenant_id, edge.target.to_string()],
             )
             .map_err(anyhow::Error::from)?;
-            c.execute(
-                "INSERT INTO graph_edges (tenant_id, source, target, relationship)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    tenant_id,
-                    edge.source.to_string(),
-                    edge.target.to_string(),
-                    edge.relationship,
-                ],
-            )
-            .map_err(anyhow::Error::from)?;
+            // Idempotent: the same edge twice is stored once.
+            let inserted = c
+                .execute(
+                    "INSERT INTO graph_edges (tenant_id, source, target, relationship)
+                     SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (
+                         SELECT 1 FROM graph_edges WHERE tenant_id = ?1
+                         AND source = ?2 AND target = ?3 AND relationship = ?4)",
+                    params![
+                        tenant_id,
+                        edge.source.to_string(),
+                        edge.target.to_string(),
+                        edge.relationship,
+                    ],
+                )
+                .map_err(anyhow::Error::from)?;
+            if inserted == 0 {
+                return Ok(());
+            }
         }
         let mut tenants = self.tenants.write().unwrap();
         let tenant = tenants.entry(tenant_id.to_string()).or_default();
@@ -211,12 +218,13 @@ impl GraphBackend for EmbeddedGraphBackend {
         Ok(())
     }
 
-    async fn neighbors(
+    async fn edges(
         &self,
         tenant_id: &str,
         id: Uuid,
         relationship: Option<&str>,
-    ) -> BackendResult<Vec<Uuid>> {
+        direction: EdgeDirection,
+    ) -> BackendResult<Vec<GraphEdge>> {
         let tenants = self.tenants.read().unwrap();
         let Some(tenant) = tenants.get(tenant_id) else {
             return Ok(Vec::new());
@@ -224,39 +232,98 @@ impl GraphBackend for EmbeddedGraphBackend {
         let Some(&node) = tenant.index.get(&id) else {
             return Ok(Vec::new());
         };
-        Ok(tenant
-            .graph
-            .edges_directed(node, Direction::Outgoing)
+        let g = &tenant.graph;
+        let outgoing = direction
+            .includes_outgoing()
+            .then(|| g.edges_directed(node, Direction::Outgoing));
+        let incoming = direction
+            .includes_incoming()
+            .then(|| g.edges_directed(node, Direction::Incoming));
+        Ok(outgoing
+            .into_iter()
+            .flatten()
+            .chain(incoming.into_iter().flatten())
             .filter(|e| relationship.is_none_or(|r| r == e.weight()))
-            .map(|e| tenant.graph[e.target()])
+            .map(|e| GraphEdge {
+                source: g[e.source()],
+                target: g[e.target()],
+                relationship: e.weight().clone(),
+            })
             .collect())
     }
 
-    async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {
+    async fn remove_edge(&self, tenant_id: &str, edge: &GraphEdge) -> BackendResult<bool> {
+        let affected = {
+            let c = self.conn.lock().unwrap();
+            c.execute(
+                "DELETE FROM graph_edges
+                 WHERE tenant_id = ?1 AND source = ?2 AND target = ?3 AND relationship = ?4",
+                params![
+                    tenant_id,
+                    edge.source.to_string(),
+                    edge.target.to_string(),
+                    edge.relationship,
+                ],
+            )
+            .map_err(anyhow::Error::from)?
+        };
         let mut tenants = self.tenants.write().unwrap();
-        let Some(tenant) = tenants.get_mut(tenant_id) else {
-            return Ok(false);
-        };
-        let Some(node) = tenant.index.remove(&id) else {
-            return Ok(false);
-        };
-        // StableDiGraph::remove_node also drops every edge incident to the
-        // node, and (unlike Graph) leaves every other NodeIndex untouched.
-        tenant.graph.remove_node(node);
-        drop(tenants);
+        let mut cached = false;
+        if let Some(tenant) = tenants.get_mut(tenant_id) {
+            if let (Some(&s), Some(&t)) = (
+                tenant.index.get(&edge.source),
+                tenant.index.get(&edge.target),
+            ) {
+                let doomed: Vec<_> = tenant
+                    .graph
+                    .edges_connecting(s, t)
+                    .filter(|e| *e.weight() == edge.relationship)
+                    .map(|e| e.id())
+                    .collect();
+                cached = !doomed.is_empty();
+                for e in doomed {
+                    tenant.graph.remove_edge(e);
+                }
+            }
+        }
+        Ok(affected > 0 || cached)
+    }
 
-        let c = self.conn.lock().unwrap();
-        c.execute(
-            "DELETE FROM graph_nodes WHERE tenant_id = ?1 AND id = ?2",
-            params![tenant_id, id.to_string()],
-        )
-        .map_err(anyhow::Error::from)?;
-        c.execute(
-            "DELETE FROM graph_edges WHERE tenant_id = ?1 AND (source = ?2 OR target = ?2)",
-            params![tenant_id, id.to_string()],
-        )
-        .map_err(anyhow::Error::from)?;
-        Ok(true)
+    async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {
+        // Durable rows first (one transaction, so nodes and edges go
+        // together), cache second: a failed SQL delete leaves the cache
+        // intact, so a retry still finds the node and tries again.
+        let affected = {
+            let mut c = self.conn.lock().unwrap();
+            let tx = c.transaction().map_err(anyhow::Error::from)?;
+            let nodes = tx
+                .execute(
+                    "DELETE FROM graph_nodes WHERE tenant_id = ?1 AND id = ?2",
+                    params![tenant_id, id.to_string()],
+                )
+                .map_err(anyhow::Error::from)?;
+            let edges = tx
+                .execute(
+                    "DELETE FROM graph_edges WHERE tenant_id = ?1 AND (source = ?2 OR target = ?2)",
+                    params![tenant_id, id.to_string()],
+                )
+                .map_err(anyhow::Error::from)?;
+            tx.commit().map_err(anyhow::Error::from)?;
+            nodes + edges
+        };
+
+        let mut tenants = self.tenants.write().unwrap();
+        let cached = tenants
+            .get_mut(tenant_id)
+            .and_then(|tenant| {
+                let node = tenant.index.remove(&id)?;
+                // StableDiGraph::remove_node also drops every edge incident
+                // to the node, and (unlike Graph) leaves every other
+                // NodeIndex untouched.
+                tenant.graph.remove_node(node)
+            })
+            .is_some();
+        Ok(affected > 0 || cached)
     }
 }
 

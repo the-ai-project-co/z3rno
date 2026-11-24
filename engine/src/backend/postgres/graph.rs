@@ -115,7 +115,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, PgPool, Row};
 
 use super::super::error::BackendResult;
-use super::super::graph::{GraphBackend, GraphEdge};
+use super::super::graph::{EdgeDirection, GraphBackend, GraphEdge};
 
 /// Derives a bounded-length, valid AGE graph name deterministically from an
 /// arbitrary `tenant_id`. `tenant_id` can contain characters that aren't
@@ -258,12 +258,13 @@ impl GraphBackend for PostgresGraphBackend {
         Ok(())
     }
 
-    async fn neighbors(
+    async fn edges(
         &self,
         tenant_id: &str,
         id: Uuid,
         relationship: Option<&str>,
-    ) -> BackendResult<Vec<Uuid>> {
+        direction: EdgeDirection,
+    ) -> BackendResult<Vec<GraphEdge>> {
         let graph = graph_name_for_tenant(tenant_id);
         let mut conn = acquire_age_ready(&self.pool).await?;
         ensure_tenant_graph(&mut conn, &graph).await?;
@@ -272,20 +273,60 @@ impl GraphBackend for PostgresGraphBackend {
             Some(r) => format!("WHERE r.name = '{}'", cypher_literal(r)?),
             None => String::new(),
         };
+        let mut patterns = Vec::new();
+        if direction.includes_outgoing() {
+            patterns.push(format!("(a:Memory {{id: '{id}'}})-[r:RELATES]->(b:Memory)"));
+        }
+        if direction.includes_incoming() {
+            patterns.push(format!("(a:Memory)-[r:RELATES]->(b:Memory {{id: '{id}'}})"));
+        }
+        let mut edges = Vec::new();
+        for pattern in patterns {
+            // Scalars only (see module docs): source id, name, target id.
+            let sql = format!(
+                "SELECT a_id::text, r_name::text, b_id::text FROM cypher('{graph}', $$ \
+                    MATCH {pattern} \
+                    {where_clause} \
+                    RETURN a.id, r.name, b.id \
+                 $$) AS (a_id agtype, r_name agtype, b_id agtype)"
+            );
+            let rows = sqlx::query(&sql)
+                .fetch_all(&mut *conn)
+                .await
+                .map_err(anyhow::Error::from)?;
+            for row in rows {
+                // AGE's agtype-to-text cast returns a string scalar unquoted
+                // (checked against AGE in the dev image), so take it as is.
+                let name: String = row.get(1);
+                edges.push(GraphEdge {
+                    source: parse_agtype_uuid(row.get::<String, _>(0).as_str())?,
+                    target: parse_agtype_uuid(row.get::<String, _>(2).as_str())?,
+                    relationship: name,
+                });
+            }
+        }
+        Ok(edges)
+    }
+
+    async fn remove_edge(&self, tenant_id: &str, edge: &GraphEdge) -> BackendResult<bool> {
+        let graph = graph_name_for_tenant(tenant_id);
+        let mut conn = acquire_age_ready(&self.pool).await?;
+        ensure_tenant_graph(&mut conn, &graph).await?;
+
+        let relationship = cypher_literal(&edge.relationship)?;
+        let (source, target) = (edge.source, edge.target);
         let sql = format!(
-            "SELECT b_id::text FROM cypher('{graph}', $$ \
-                MATCH (a:Memory {{id: '{id}'}})-[r:RELATES]->(b:Memory) \
-                {where_clause} \
-                RETURN b.id \
-             $$) AS (b_id agtype)"
+            "SELECT a_id::text FROM cypher('{graph}', $$ \
+                MATCH (a:Memory {{id: '{source}'}})-[r:RELATES {{name: '{relationship}'}}]->(b:Memory {{id: '{target}'}}) \
+                DELETE r \
+                RETURN a.id \
+             $$) AS (a_id agtype)"
         );
         let rows = sqlx::query(&sql)
             .fetch_all(&mut *conn)
             .await
             .map_err(anyhow::Error::from)?;
-        rows.into_iter()
-            .map(|row| parse_agtype_uuid(row.get::<String, _>(0).as_str()))
-            .collect()
+        Ok(!rows.is_empty())
     }
 
     async fn remove_node(&self, tenant_id: &str, id: Uuid) -> BackendResult<bool> {

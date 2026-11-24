@@ -71,8 +71,7 @@ async fn store(
             metadata,
             links,
         )
-        .await
-        .map_err(anyhow::Error::from)?;
+        .await?;
 
     Ok((StatusCode::CREATED, Json(memory)))
 }
@@ -93,8 +92,7 @@ async fn list(State(state): State<AppState>, ctx: AuthContext) -> ApiResult<Json
         .engine
         .advanced()
         .list_memories(&ctx.tenant_id)
-        .await
-        .map_err(anyhow::Error::from)?;
+        .await?;
     let total = results.len();
     Ok(Json(ListResponse { results, total }))
 }
@@ -124,8 +122,7 @@ async fn neighbors(
         .engine
         .advanced()
         .neighbors(&ctx.tenant_id, id, params.relationship.as_deref())
-        .await
-        .map_err(anyhow::Error::from)?;
+        .await?;
     Ok(Json(NeighborsResponse { neighbors }))
 }
 
@@ -151,8 +148,7 @@ async fn recall(
     let results = state
         .engine
         .recall(&ctx.tenant_id, body.query, body.k)
-        .await
-        .map_err(anyhow::Error::from)?;
+        .await?;
     let total = results.len();
     Ok(Json(RecallResponse { results, total }))
 }
@@ -169,12 +165,7 @@ async fn forget(
 ) -> ApiResult<Json<ForgetProof>> {
     ctx.require_role(&[Role::Admin, Role::Write])?;
 
-    match state
-        .engine
-        .forget(&ctx.tenant_id, body.id)
-        .await
-        .map_err(anyhow::Error::from)?
-    {
+    match state.engine.forget(&ctx.tenant_id, body.id).await? {
         Some(proof) => Ok(Json(proof)),
         None => Err(ApiError::NotFound(format!(
             "no memory {} to forget",

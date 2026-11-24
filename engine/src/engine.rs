@@ -156,7 +156,7 @@ impl MemoryEngine {
             tier,
             content,
             metadata,
-            created_at: chrono::Utc::now(),
+            created_at: crate::model::now(),
         };
 
         self.engine_backend

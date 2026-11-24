@@ -1,6 +1,14 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SubsecRound, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// The current time at microsecond precision, the finest Postgres
+/// `timestamptz` stores. Timestamps that are persisted are created with
+/// this, so a record reads back exactly as it was written on every
+/// backend (Linux clocks have nanosecond resolution).
+pub fn now() -> DateTime<Utc> {
+    Utc::now().trunc_subsecs(6)
+}
 
 /// The four memory tiers z3rno organizes storage across.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,4 +31,12 @@ pub struct Memory {
     pub content: String,
     pub metadata: serde_json::Value,
     pub created_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn now_has_no_sub_microsecond_part() {
+        assert_eq!(super::now().timestamp_subsec_nanos() % 1_000, 0);
+    }
 }

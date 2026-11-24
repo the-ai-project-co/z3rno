@@ -163,9 +163,26 @@ async fn ensure_schema(conn: &mut sqlx::PgConnection) -> BackendResult<()> {
     Ok(())
 }
 
+/// The `vectors.embedding` column has a fixed width, so a vector of any
+/// other length fails inside Postgres with an opaque type error. Reject it
+/// up front with a message that says what's wrong.
+fn check_dims(what: &str, v: &[f32]) -> BackendResult<()> {
+    if v.len() != EMBEDDING_DIMS {
+        return Err(anyhow::anyhow!(
+            "{what} has {} dimensions; the Postgres backend stores {EMBEDDING_DIMS}-dimensional \
+             embeddings (the built-in hashing fallback produces 128), so pass embeddings \
+             from a {EMBEDDING_DIMS}-dimensional model",
+            v.len()
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl VectorBackend for PostgresVectorBackend {
     async fn upsert(&self, tenant_id: &str, id: Uuid, embedding: Vec<f32>) -> BackendResult<()> {
+        check_dims("embedding", &embedding)?;
         let mut tx = tenant_scoped_tx(&self.pool, tenant_id).await?;
         sqlx::query(
             "INSERT INTO vectors (tenant_id, id, embedding) VALUES ($1, $2, $3)
@@ -187,6 +204,7 @@ impl VectorBackend for PostgresVectorBackend {
         query: Vec<f32>,
         k: usize,
     ) -> BackendResult<Vec<VectorMatch>> {
+        check_dims("query embedding", &query)?;
         let mut tx = tenant_scoped_tx(&self.pool, tenant_id).await?;
         let rows: Vec<(Uuid, f64)> = sqlx::query_as(
             "SELECT id, embedding <=> $1 AS distance FROM vectors \
@@ -227,6 +245,15 @@ impl VectorBackend for PostgresVectorBackend {
 mod tests {
     use super::*;
     use crate::backend::postgres::provision::{connect, ensure_extensions};
+
+    #[test]
+    fn wrong_width_embeddings_are_rejected_before_postgres() {
+        assert!(check_dims("embedding", &vec![0.0; EMBEDDING_DIMS]).is_ok());
+        let err = check_dims("embedding", &[0.0; 128])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("has 128 dimensions"), "{err}");
+    }
 
     // See relational.rs's test module for why each test opens its own pool
     // (a `static`-shared `PgPool` doesn't survive across `#[tokio::test]`'s

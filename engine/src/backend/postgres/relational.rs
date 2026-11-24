@@ -367,8 +367,7 @@ impl EngineBackend for PostgresEngineBackend {
                 let data: serde_json::Value = row.try_get("data")?;
                 Ok(serde_json::from_value::<AuditEvent>(data)?.hash)
             })
-            .transpose()
-            .map_err(anyhow::Error::from)?;
+            .transpose()?;
         let event = AuditEvent::next(tenant_id, operation, memory_id, prev_hash);
         let data = serde_json::to_value(&event).map_err(anyhow::Error::from)?;
         sqlx::query(
@@ -461,7 +460,7 @@ mod tests {
             tenant_id: tenant_id.to_string(),
             kind: "memory".into(),
             data: serde_json::json!({"content": "hello"}),
-            created_at: Utc::now(),
+            created_at: crate::model::now(),
         }
     }
 
